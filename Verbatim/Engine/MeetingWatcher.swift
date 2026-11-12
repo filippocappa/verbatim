@@ -102,10 +102,17 @@ final class MeetingWatcher {
                 current = now
                 onChange?(now)
             }
+        } else if let current, Self.stillPlaying(current.app) {
+            // Muted mic but the call still playing sound: still on the call.
+            lastSeen = Date()
         } else if current != nil, Date().timeIntervalSince(lastSeen) > grace {
             current = nil
             onChange?(nil)
         }
+    }
+
+    private static func stillPlaying(_ app: App) -> Bool {
+        SystemAudio.processes().contains { p in p.output && app.prefixes.contains { p.bundleID.hasPrefix($0) } }
     }
 
     /// "Google Meet" when one of the browser's windows shows a call. Needs Accessibility, which Verbatim already has.

@@ -23,6 +23,8 @@ final class DictationController {
         case stopped
         /// Recording, but the call is silent: almost always the System Audio Recording permission.
         case cantHear
+        case writingNotes
+        case saved(URL)
         case failed(String)
     }
 
@@ -45,7 +47,7 @@ final class DictationController {
         var isInteractive: Bool {
             switch self {
             case .learned, .notice(.needsAccessibility), .notice(.micDenied),
-                 .meeting(.offer), .meeting(.cantHear): true
+                 .meeting(.offer), .meeting(.cantHear), .meeting(.saved): true
             default: false
             }
         }
@@ -637,6 +639,8 @@ final class DictationController {
         case .started: 4
         case .stopped: 2.5
         case .cantHear: 10
+        case .writingNotes: 120
+        case .saved: 10
         case .failed: 5
         }
         show(.meeting(pill), for: seconds)

@@ -26,6 +26,15 @@ final class MeetingController {
     /// The call already offered, so ignoring the offer doesn't bring it back every 2 s.
     @ObservationIgnored private var offered: MeetingWatcher.Call?
     @ObservationIgnored private var hearingCheck: Task<Void, Never>?
+    @ObservationIgnored private var notes: MeetingNotes?
+    @ObservationIgnored private var chunker: Task<Void, Never>?
+    /// Pieces still being transcribed, so the recap waits for them.
+    @ObservationIgnored private var pending: [Task<Void, Never>] = []
+    /// Where each side has been cut up to.
+    @ObservationIgnored private var cutThem = 0
+    @ObservationIgnored private var cutYou = 0
+    /// The notes file being written, or the last one.
+    private(set) var lastFile: URL?
     @ObservationIgnored private let log = Logger(subsystem: AppInfo.bundleID, category: "meetings")
 
     func startWatching() {
@@ -70,7 +79,19 @@ final class MeetingController {
         }
         self.them = them
         self.you = you
-        state = .recording(call, started: Date())
+        let startDate = Date()
+        state = .recording(call, started: startDate)
+        let notes = MeetingNotes(title: call.title, started: startDate)
+        self.notes = notes
+        lastFile = notes.file
+        cutThem = 0; cutYou = 0; pending = []
+        chunker = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                guard let self, self.isRecording else { return }
+                self.cut(final: false)
+            }
+        }
         log.info("taking notes: \(them.tapped.joined(separator: ", "), privacy: .public)")
         DictationController.shared.showMeeting(.started(title: call.title))
         watchHearing(them)
@@ -88,13 +109,52 @@ final class MeetingController {
         guard isRecording else { return }
         hearingCheck?.cancel()
         ticker?.cancel()
+        chunker?.cancel()
+        cut(final: true)
         them?.stop()
         _ = you?.stop()
         them = nil
         you = nil
         state = .idle
         log.info("stopped taking notes")
-        DictationController.shared.showMeeting(.stopped)
+        guard let notes else { DictationController.shared.showMeeting(.stopped); return }
+        self.notes = nil
+        let waiting = pending
+        pending = []
+        DictationController.shared.showMeeting(.writingNotes)
+        Task {
+            for t in waiting { await t.value }
+            let ok = await notes.finish()
+            self.log.info("notes written: \(ok)")
+            DictationController.shared.showMeeting(.saved(notes.file))
+        }
+    }
+
+    /// Sends each side's audio off in pieces of about 25 s, cut at a pause, then frees it.
+    private func cut(final: Bool) {
+        guard let notes, isRecording else { return }
+        let rate = Int(AudioRecorder.sampleRate)
+        func piece(_ count: Int, _ from: Int, _ read: (Int, Int) -> [Float]) -> (samples: [Float], end: Int)? {
+            let available = count - from
+            if final { return available > rate / 2 ? (read(from, count), count) : nil }
+            guard available >= 25 * rate else { return nil }
+            let all = read(from, count)
+            // Cut at a pause in the last 10 s; past 40 s, cut anyway.
+            if let p = AudioRecorder.pause(in: all, lookback: 10 * rate), p > 15 * rate { return (Array(all[..<p]), from + p) }
+            return available >= 40 * rate ? (all, count) : nil
+        }
+        if let them, let p = piece(them.sampleCount, cutThem, them.samples(from:to:)) {
+            let at = Double(cutThem) / Double(rate)
+            cutThem = p.end
+            them.discard(upTo: p.end)
+            pending.append(Task { await notes.transcribe(p.samples, at: at, them: true) })
+        }
+        if let you, let p = piece(you.sampleCount, cutYou, you.samples(from:to:)) {
+            let at = Double(cutYou) / Double(rate)
+            cutYou = p.end
+            you.discard(upTo: p.end)
+            pending.append(Task { await notes.transcribe(p.samples, at: at, them: false) })
+        }
     }
 
     /// A refused System Audio Recording permission gives silence, not an error. If the call stays silent
@@ -105,12 +165,6 @@ final class MeetingController {
             try? await Task.sleep(for: .seconds(20))
             guard !Task.isCancelled, let self, self.isRecording else { return }
             if them.peakRMS < 0.0005 { DictationController.shared.showMeeting(.cantHear) }
-            // Until step 3 sends audio off to be transcribed, keep memory flat by dropping what's been heard.
-            while !Task.isCancelled, self.isRecording {
-                them.discard(upTo: them.sampleCount)
-                self.you?.discard(upTo: self.you?.sampleCount ?? 0)
-                try? await Task.sleep(for: .seconds(10))
-            }
         }
     }
 }

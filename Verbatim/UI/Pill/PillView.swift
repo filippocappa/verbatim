@@ -209,6 +209,25 @@ private struct MeetingContent: View {
             .padding(.leading, 15)
             .padding(.trailing, 7)
 
+        case .writingNotes:
+            HStack(spacing: 9) {
+                ProgressView().controlSize(.small)
+                Text("Writing your meeting notes")
+            }
+            .padding(.horizontal, 16)
+
+        case let .saved(file):
+            HStack(spacing: 9) {
+                StatusBadge(symbol: "checkmark", fill: .green)
+                Text("Meeting notes ready")
+                PillButton(title: "Open") {
+                    NSWorkspace.shared.open(file)
+                    DictationController.shared.dismiss()
+                }
+            }
+            .padding(.leading, 9)
+            .padding(.trailing, 7)
+
         case let .failed(message):
             HStack(spacing: 9) {
                 Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)

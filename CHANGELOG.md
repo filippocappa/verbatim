@@ -11,7 +11,11 @@ Meeting notes, without a bot joining the call. Built so far:
 - **Stops by itself** about 20 seconds after the call app lets go of the mic.
 - If the call stays silent for 20 seconds, the pill says "Can't hear the call" with a button to the permission setting.
 
-Not yet: the transcript, the recap and the Meetings page. For now nothing is saved.
+- **Notes, quick version.** While the call runs, both sides are written down every ~25 seconds into a file in **Documents → Verbatim Meetings**, as "You" and "Them" lines with times. When the call ends, a recap (summary, decisions, action items, open questions) goes on top, and the pill shows "Meeting notes ready" with Open.
+- If the mic picks up the others through the speakers, those repeated lines are dropped.
+- The call doesn't end while you're muted, as long as the call app is still playing sound.
+
+Not yet: the Meetings page inside the app. No audio is saved.
 
 ## 12 November 2026, afternoon
 
