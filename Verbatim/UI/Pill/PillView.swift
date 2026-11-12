@@ -9,7 +9,7 @@ struct PillView: View {
         GlassEffectContainer {
             if controller.phase != .idle {
                 PillContent(phase: controller.phase, levels: controller.levels, startedAt: controller.startedAt,
-                            command: controller.command, onUndo: controller.undoLearned)
+                            command: controller.command, note: controller.writingNote, onUndo: controller.undoLearned)
                     .glassEffect(.regular, in: .capsule)
                     .glassEffectID("pill", in: glass)
                     .glassEffectTransition(.materialize)
@@ -27,6 +27,7 @@ struct PillContent: View {
     var levels: [Float] = []
     var startedAt: Date?
     var command: DictationController.CommandKind?
+    var note: String?
     var onUndo: () -> Void = {}
 
     private var tag: String? {
@@ -69,6 +70,9 @@ struct PillContent: View {
                 HStack(spacing: 9) {
                     ProgressView().controlSize(.small)
                     Text(command == .rewrite ? "Rewriting" : command == .action ? "Working" : "Writing")
+                    if let note {
+                        Text(note).foregroundStyle(.secondary).transition(.opacity)
+                    }
                 }
                 .padding(.horizontal, 16)
 

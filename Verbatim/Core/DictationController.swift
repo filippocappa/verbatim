@@ -47,6 +47,8 @@ final class DictationController {
     private(set) var startedAt: Date?
     /// Set while recording or running a command (⌥⌥), nil for plain dictation.
     private(set) var command: CommandKind?
+    /// A second line for the "Writing" pill, e.g. when Groq is slow and the Mac takes over.
+    private(set) var writingNote: String?
 
     enum CommandKind: Equatable {
         case rewrite // text was selected
@@ -323,6 +325,7 @@ final class DictationController {
             command = nil
             show(.notice(.nothingHeard)); return
         }
+        writingNote = nil
         phase = .writing
         if command == nil {
             // You may have switched apps while talking. ⌘V lands wherever you are now,
@@ -427,8 +430,12 @@ final class DictationController {
                     let words = Vocabulary.promptWords(entries)
                     if let joined = await joinParts(sent, samples: samples, key: key, words: words) {
                         transcript = joined
-                    } else {
+                    } else if sent.isEmpty {
                         transcript = try await cloudTranscript(samples, key: key, words: words)
+                    } else {
+                        // A part already failed, almost always because Groq is slow or down right now.
+                        // Sending the whole clip again would only add another wait, so go to the Mac.
+                        throw GroqError(message: "an early part didn't come back", status: 0)
                     }
                     keyRejected = false
                 } catch {
@@ -436,6 +443,7 @@ final class DictationController {
                     if Task.isCancelled { return nil }
                     log.error("Groq failed, using Apple: \(error.localizedDescription, privacy: .public)")
                     engine = "apple"
+                    writingNote = "Groq is slow, using this Mac"
                     transcript = try await transcribeOnDevice(samples, entries)
                 }
             } else {
@@ -453,12 +461,16 @@ final class DictationController {
     private func cloudTranscript(_ samples: [Float], key: String, words: [String]) async throws -> Groq.Transcript {
         let language = Prefs.language
         let audio = await Task.detached { Groq.upload(samples) }.value
+        // Groq usually answers in under a second, even for a minute of audio. If nothing comes back
+        // for a few seconds it's having trouble, and the Mac's own engine will be quicker.
+        let timeout = min(12, 5 + Double(samples.count) / AudioRecorder.sampleRate * 0.1)
         if language == "auto" {
-            return try await Groq.transcribeAuto(wav: audio.data, key: key, words: words, filename: audio.filename).pick
+            return try await Groq.transcribeAuto(wav: audio.data, key: key, words: words, filename: audio.filename,
+                                                 timeout: timeout).pick
         }
         return try await Groq.transcribe(wav: audio.data, key: key,
                                          prompt: Groq.whisperPrompt(words: words, language: language),
-                                         language: language, filename: audio.filename)
+                                         language: language, filename: audio.filename, timeout: timeout)
     }
 
     /// The parts sent early plus the rest, as one transcript. nil if there were no parts or one failed,

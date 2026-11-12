@@ -71,7 +71,8 @@ nonisolated enum Groq {
         return (WAV.encode(samples), "audio.wav")
     }
 
-    static func transcribe(wav: Data, key: String, prompt: String?, language: String?, filename: String = "audio.wav") async throws -> Transcript {
+    static func transcribe(wav: Data, key: String, prompt: String?, language: String?, filename: String = "audio.wav",
+                           timeout: TimeInterval = 20) async throws -> Transcript {
         let boundary = "parla-\(UUID().uuidString)"
         var body = Data()
         func field(_ name: String, _ value: String) {
@@ -90,7 +91,7 @@ nonisolated enum Groq {
         req.httpMethod = "POST"
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        req.timeoutInterval = 20
+        req.timeoutInterval = timeout
 
         let (data, resp) = try await session.upload(for: req, from: body)
         GroqLimits.record(.speech, resp, data: data)
@@ -108,9 +109,9 @@ nonisolated enum Groq {
     /// primer. The primer keeps mixed sentences mixed, but on some plain English clips it makes Whisper
     /// translate everything into Italian. Without it, mixed sentences get translated into English.
     /// So: if the plain run is English and the primed run came out Italian, the primer did that, use plain.
-    static func transcribeAuto(wav: Data, key: String, words: [String], filename: String = "audio.wav") async throws -> (pick: Transcript, primed: Transcript?, plain: Transcript?) {
-        async let primedRun = try? transcribe(wav: wav, key: key, prompt: whisperPrompt(words: words, language: "auto"), language: "auto", filename: filename)
-        async let plainRun = try? transcribe(wav: wav, key: key, prompt: whisperPrompt(words: words, language: "plain"), language: "auto", filename: filename)
+    static func transcribeAuto(wav: Data, key: String, words: [String], filename: String = "audio.wav", timeout: TimeInterval = 20) async throws -> (pick: Transcript, primed: Transcript?, plain: Transcript?) {
+        async let primedRun = try? transcribe(wav: wav, key: key, prompt: whisperPrompt(words: words, language: "auto"), language: "auto", filename: filename, timeout: timeout)
+        async let plainRun = try? transcribe(wav: wav, key: key, prompt: whisperPrompt(words: words, language: "plain"), language: "auto", filename: filename, timeout: timeout)
         let (primed, plain) = await (primedRun, plainRun)
         guard let primed else {
             if let plain { return (plain, nil, plain) }

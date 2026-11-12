@@ -2,6 +2,11 @@
 
 Newest first. Each entry says what changed and where to find it.
 
+## 12 November 2026, afternoon
+
+- **No more long "Writing" when Groq is slow.** It used to wait up to 20 s for Groq, then try again for another 20 s before using the Mac (42 s once at 12:22). Now it waits 5 to 12 s depending on how long you talked, never tries twice, and the pill says "Groq is slow, using this Mac" while the Mac takes over.
+- The project folder and the GitHub repo are now both called Verbatim (github.com/filippocappa/verbatim, private). The old Parla files went to the Trash.
+
 ## 12 November 2026, later
 
 - **Commands:** the plain Write / Open and search switch is now a wide sliding switch, with a one-line description under each side.
