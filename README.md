@@ -1,6 +1,6 @@
-# Parla
+# Verbatim
 
-A personal dictation app for macOS. The app itself is called Verbatim.
+A personal dictation app for macOS.
 
 - Double-tap ⌘, speak in English or Italian, tap ⌘ again, and the text is pasted where you're typing.
 - Double-tap ⌥ for commands: rewrite the selected text, open apps and sites, search, or run your own saved commands.
