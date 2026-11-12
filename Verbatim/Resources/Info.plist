@@ -22,6 +22,8 @@
     <true/>
     <key>LSMinimumSystemVersion</key>
     <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>$(APP_DISPLAY_NAME) listens to your meeting app, only when you choose to take notes, to write the transcript and recap.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>$(APP_DISPLAY_NAME) listens only while you dictate, to turn your voice into text.</string>
     <key>NSSpeechRecognitionUsageDescription</key>

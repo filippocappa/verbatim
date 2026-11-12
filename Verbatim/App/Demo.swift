@@ -16,6 +16,12 @@ enum Demo {
             Task { await testLearning(in: bundle, text: d.string(forKey: "learnText"), editByHand: !d.bool(forKey: "learnWait")); exit(0) }
             return
         }
+        // -testTap com.apple.QuickTimePlayerX: listens to that app (and the mic) for -tapSeconds, printing levels,
+        // then transcribes what the app played. -testTap all listens to the whole Mac.
+        if let prefix = d.string(forKey: "testTap") {
+            Task { await testTap(prefix == "all" ? [] : [prefix], seconds: max(d.double(forKey: "tapSeconds"), 8)); exit(0) }
+            return
+        }
         if d.bool(forKey: "probeMic") {
             for m in Microphone.inputs() { print("input:", m.name, m.uid, m.isBluetooth ? "bluetooth" : m.isBuiltIn ? "built-in" : "other") }
             print("system default:", Microphone.systemDefault()?.name ?? "none")
@@ -276,6 +282,36 @@ enum Demo {
     }
 
     /// Times the upload formats against each other on one clip, three runs each.
+    static func testTap(_ prefixes: [String], seconds: Double) async {
+        print("processes using audio:")
+        for p in SystemAudio.processes() where p.input || p.output { print("  ", p) }
+        let them = SystemAudio()
+        let you = AudioRecorder()
+        do { try them.start(prefixes: prefixes) } catch { print("tap failed:", error.localizedDescription); return }
+        print("listening to:", them.tapped.joined(separator: ", "))
+        do { try you.start(device: Microphone.systemDefault()) } catch { print("mic failed:", error.localizedDescription) }
+        let rate = Int(AudioRecorder.sampleRate)
+        func rms(_ x: [Float]) -> Float { x.isEmpty ? 0 : sqrt(x.reduce(0) { $0 + $1 * $1 } / Float(x.count)) }
+        var lastThem = 0, lastYou = 0
+        for second in 1...Int(seconds) {
+            try? await Task.sleep(for: .seconds(1))
+            let t = them.sampleCount, y = you.sampleCount
+            let lt = rms(them.samples(from: lastThem, to: t)), ly = rms(you.samples(from: lastYou, to: y))
+            print(String(format: "%2ds  them %.4f (%d samples)  you %.4f", second, lt, t - lastThem, ly))
+            lastThem = t; lastYou = y
+        }
+        let audio = them.samples(from: 0, to: them.sampleCount)
+        them.stop()
+        _ = you.stop()
+        print(String(format: "them: %.1f s, peak %.4f", Double(audio.count) / Double(rate), them.peakRMS))
+        if them.peakRMS < 0.0005 { print("SILENT: probably no System Audio Recording permission"); return }
+        guard let key = Keychain.groqKey else { return }
+        let up = Groq.upload(audio)
+        if let t = try? await Groq.transcribe(wav: up.data, key: key, prompt: nil, language: "auto", filename: up.filename) {
+            print("them said:", t.text)
+        }
+    }
+
     static func speedTest(_ path: String) async {
         guard let key = Keychain.groqKey, let samples = try? load(path) else { print("no key or clip"); return }
         print("audio: \(Double(samples.count) / 16_000) s")
