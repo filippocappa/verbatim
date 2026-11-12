@@ -126,6 +126,7 @@ private struct Switch: View {
 
 private struct GeneralSettings: View {
     @AppStorage(Prefs.Key.sounds) private var sounds = true
+    @AppStorage(Prefs.Key.pillPlace) private var place = "pill"
     @AppStorage(Prefs.Key.keepOnClipboard) private var keepOnClipboard = true
     @AppStorage(Prefs.Key.learnFromCorrections) private var learn = true
     @AppStorage(Prefs.Key.typingWPM) private var typingWPM = 40
@@ -160,6 +161,17 @@ private struct GeneralSettings: View {
             }
 
             SettingsGroup(title: "While you dictate") {
+                SettingsRow(symbol: "capsule.portrait", title: "Where it shows",
+                            detail: place == "notch" ? "Everything drops down from the notch, small and black."
+                                                     : "Dictation at the bottom. Call messages at the top, so they don't cover the call's buttons.") {
+                    Picker("", selection: $place) {
+                        Text("Pill").tag("pill")
+                        Text("Notch").tag("notch")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                }
                 SettingsRow(symbol: "speaker.wave.2", title: "Sounds", detail: "A short sound when it starts and stops.") {
                     Switch(isOn: $sounds)
                 }

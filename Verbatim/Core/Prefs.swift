@@ -22,6 +22,7 @@ enum Prefs {
         static let didOnboard = "didOnboard"
         static let paused = "paused"
         static let meetingOffer = "meetingOffer"        // offer to take notes when a call starts
+        static let pillPlace = "pillPlace"              // "pill" (bottom, calls at the top) or "notch"
     }
 
     static let defaultCleanupModel = "qwen/qwen3.8-27b"
@@ -43,6 +44,7 @@ enum Prefs {
             Key.didOnboard: false,
             Key.paused: false,
             Key.meetingOffer: true,
+            Key.pillPlace: "pill",
         ])
     }
 
@@ -60,6 +62,7 @@ enum Prefs {
     static var learnFromCorrections: Bool { d.bool(forKey: Key.learnFromCorrections) }
     static var sounds: Bool { d.bool(forKey: Key.sounds) }
     static var meetingOffer: Bool { d.bool(forKey: Key.meetingOffer) }
+    static var useNotch: Bool { d.string(forKey: Key.pillPlace) == "notch" }
     static var microphone: String { d.string(forKey: Key.microphone) ?? "auto" }
     static var typingWPM: Int { max(10, d.integer(forKey: Key.typingWPM)) }
     static var paused: Bool {

@@ -29,7 +29,8 @@ enum Demo {
                 switch pill {
                 case "started": controller.showMeeting(.started(title: "Google Meet in Chrome"))
                 case "cantHear": controller.showMeeting(.cantHear)
-                default: controller.showMeeting(.offer(app: "Zoom", title: "Zoom call", bundleID: "us.zoom.xos"))
+                case "listening": controller.demoPhase(.listening)
+                default: controller.showMeeting(.offer(app: "Chrome", title: "Google Meet in Chrome", bundleID: "com.google.Chrome", service: "meet.google.com"))
                 }
             }
         }

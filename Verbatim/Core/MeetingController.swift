@@ -40,6 +40,7 @@ final class MeetingController {
     func startWatching() {
         watcher.onChange = { [weak self] call in self?.callChanged(call) }
         watcher.start()
+        for domain in MeetingWatcher.serviceDomains { ServiceLogos.shared.load(domain) }
     }
 
     private func callChanged(_ call: MeetingWatcher.Call?) {
@@ -48,7 +49,7 @@ final class MeetingController {
             guard !isRecording, Prefs.meetingOffer, offered != call else { return }
             offered = call
             log.notice("offering notes, pill was: \(String(describing: DictationController.shared.phase), privacy: .public)")
-            DictationController.shared.showMeeting(.offer(app: call.app.name, title: call.title, bundleID: call.app.bundleID))
+            DictationController.shared.showMeeting(.offer(app: call.app.name, title: call.title, bundleID: call.app.bundleID, service: call.service))
             if Prefs.sounds { NSSound(named: "Tink")?.play() }
             #if DEBUG
             if UserDefaults.standard.bool(forKey: "autoTakeNotes") { start(call) }
@@ -84,7 +85,7 @@ final class MeetingController {
         self.you = you
         let startDate = Date()
         state = .recording(call, started: startDate)
-        let notes = MeetingNotes(title: call.title, bundleID: call.app.bundleID, started: startDate)
+        let notes = MeetingNotes(title: call.title, bundleID: call.app.bundleID, service: call.service, started: startDate)
         self.notes = notes
         lastFile = notes.file
         cutThem = 0; cutYou = 0; pending = []

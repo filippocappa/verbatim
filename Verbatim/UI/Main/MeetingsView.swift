@@ -8,6 +8,7 @@ struct MeetingFile: Identifiable, Equatable {
     let title: String
     let started: Date
     let bundleID: String?
+    let service: String?
     /// Length, from the last line's time.
     let length: String?
     let text: String
@@ -24,6 +25,7 @@ struct MeetingFile: Identifiable, Equatable {
             meta.components(separatedBy: " ").first { $0.hasPrefix(k + "=") }.map { String($0.dropFirst(k.count + 1)) }
         }
         bundleID = field("app").flatMap { $0.isEmpty ? nil : $0 }
+        service = field("service").flatMap { $0.isEmpty ? nil : $0 }
         started = field("started").flatMap(Double.init).map(Date.init(timeIntervalSince1970:))
             ?? ((try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast)
         // From start to the file's last write (the recap, just after the call ends).
@@ -150,7 +152,14 @@ private struct MeetingRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            AppIconView(bundleID: meeting.bundleID, size: 20).padding(.top, 1)
+            Group {
+                if let service = meeting.service, let logo = ServiceLogos.shared.image(service) {
+                    Image(nsImage: logo).resizable().frame(width: 20, height: 20).clipShape(.rect(cornerRadius: 5))
+                } else {
+                    AppIconView(bundleID: meeting.bundleID, size: 20)
+                }
+            }
+            .padding(.top, 1)
             VStack(alignment: .leading, spacing: 3) {
                 Text(meeting.title).lineLimit(1)
                 HStack(spacing: 5) {

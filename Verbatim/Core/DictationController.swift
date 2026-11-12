@@ -18,7 +18,7 @@ final class DictationController {
     }
 
     enum MeetingPill: Equatable {
-        case offer(app: String, title: String, bundleID: String)
+        case offer(app: String, title: String, bundleID: String, service: String?)
         case started(title: String)
         case stopped
         /// Recording, but the call is silent: almost always the System Audio Recording permission.
@@ -653,6 +653,14 @@ final class DictationController {
             self.meetingPill = nil
         }
     }
+
+    #if DEBUG
+    /// For screenshots of a phase without dictating.
+    func demoPhase(_ p: Phase) {
+        startedAt = Date()
+        show(p, for: 30)
+    }
+    #endif
 
     func dismissMeeting() {
         meetingDismiss?.cancel()

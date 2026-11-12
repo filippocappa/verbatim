@@ -22,6 +22,8 @@ final class MeetingWatcher {
     struct Call: Equatable, Sendable {
         let app: App
         let title: String
+        /// The web service in a browser ("meet.google.com"), for its logo. nil for call apps, which show their own icon.
+        var service: String? = nil
     }
 
     static let apps: [App] = {
@@ -52,10 +54,15 @@ final class MeetingWatcher {
     ]
 
     /// Browser window titles that mean a call, and the name to show for it.
-    private static let webCalls: [(match: String, name: String)] = [
-        ("Meet - ", "Google Meet"), ("Meet – ", "Google Meet"), ("Google Meet", "Google Meet"), ("meet.google.com", "Google Meet"),
-        ("Microsoft Teams", "Teams"), ("Webex", "Webex"), ("Zoom", "Zoom"), ("Whereby", "Whereby"), ("Jitsi", "Jitsi"),
+    private static let webCalls: [(match: String, name: String, domain: String)] = [
+        ("Meet - ", "Google Meet", "meet.google.com"), ("Meet – ", "Google Meet", "meet.google.com"),
+        ("Google Meet", "Google Meet", "meet.google.com"), ("meet.google.com", "Google Meet", "meet.google.com"),
+        ("Microsoft Teams", "Teams", "teams.microsoft.com"), ("Webex", "Webex", "webex.com"), ("Zoom", "Zoom", "zoom.us"),
+        ("Whereby", "Whereby", "whereby.com"), ("Jitsi", "Jitsi", "meet.jit.si"),
     ]
+
+    /// Every service logo that may be needed, so they're ready before the first call.
+    static var serviceDomains: [String] { Array(Set(webCalls.map(\.domain))) }
 
     /// Called on every change: a call started (non-nil) or ended (nil).
     var onChange: ((Call?) -> Void)?
@@ -93,7 +100,7 @@ final class MeetingWatcher {
         // A dedicated call app wins over a browser that happens to use the mic.
         if let app = apps.first(where: { !$0.isBrowser }) { return Call(app: app, title: "\(app.name) call") }
         for app in apps {
-            if let name = Self.webCallName(app) { return Call(app: app, title: "\(name) in \(app.name)") }
+            if let web = Self.webCall(app) { return Call(app: app, title: "\(web.name) in \(app.name)", service: web.domain) }
         }
         if let app = apps.first { return Call(app: app, title: "Call in \(app.name)") }
         return nil
@@ -122,7 +129,7 @@ final class MeetingWatcher {
     }
 
     /// "Google Meet" when one of the browser's windows shows a call. Needs Accessibility, which Verbatim already has.
-    private static func webCallName(_ app: App) -> String? {
+    private static func webCall(_ app: App) -> (name: String, domain: String)? {
         for running in NSRunningApplication.runningApplications(withBundleIdentifier: app.bundleID) {
             let element = AXUIElementCreateApplication(running.processIdentifier)
             var windows: CFTypeRef?
@@ -132,9 +139,9 @@ final class MeetingWatcher {
                 var title: CFTypeRef?
                 AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &title)
                 guard let t = title as? String else { continue }
-                if let hit = webCalls.first(where: { t.contains($0.match) }) { return hit.name }
+                if let hit = webCalls.first(where: { t.contains($0.match) }) { return (hit.name, hit.domain) }
                 // Meet's waiting room is titled just "Meet".
-                if t == "Meet" || t.hasPrefix("Meet ") { return "Google Meet" }
+                if t == "Meet" || t.hasPrefix("Meet ") { return ("Google Meet", "meet.google.com") }
             }
         }
         return nil

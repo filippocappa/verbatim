@@ -104,10 +104,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = DictationController.shared
         let pill = PillPanel(controller: controller)
         self.pill = pill
-        controller.onPhaseChange = { [weak pill] phase in pill?.update(for: phase) }
         let notch = NotchPanel(controller: controller)
         self.notch = notch
-        controller.onMeetingChange = { [weak notch] pill in notch?.update(for: pill) }
+        controller.onPhaseChange = { [weak pill, weak notch] phase in pill?.update(for: phase); notch?.refresh() }
+        controller.onMeetingChange = { [weak notch] _ in notch?.refresh() }
         controller.start()
         MeetingController.shared.startWatching()
         DockPolicy.start()

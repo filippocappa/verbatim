@@ -36,7 +36,8 @@ final class PillPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     func update(for phase: DictationController.Phase) {
-        ignoresMouseEvents = !phase.isInteractive
+        // In notch mode everything shows from the notch instead.
+        ignoresMouseEvents = !phase.isInteractive || Prefs.useNotch
         hideWork?.cancel()
         if phase == .idle {
             // Let the glass dissolve before the window goes.

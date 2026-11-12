@@ -4,10 +4,11 @@ import SwiftUI
 struct PillView: View {
     @Environment(DictationController.self) private var controller
     @Namespace private var glass
+    @AppStorage(Prefs.Key.pillPlace) private var place = "pill"
 
     var body: some View {
         GlassEffectContainer {
-            if controller.phase != .idle {
+            if controller.phase != .idle && place != "notch" {
                 PillContent(phase: controller.phase, levels: controller.levels, startedAt: controller.startedAt,
                             command: controller.command, note: controller.writingNote, onUndo: controller.undoLearned)
                     .glassEffect(.regular, in: .capsule)
@@ -29,6 +30,8 @@ struct PillContent: View {
     var command: DictationController.CommandKind?
     var note: String?
     var onUndo: () -> Void = {}
+    /// Smaller, for the notch.
+    var compact = false
 
     private var tag: String? {
         switch command {
@@ -121,9 +124,9 @@ struct PillContent: View {
                 NoticeContent(notice: notice)
             }
         }
-        .font(.system(size: 13))
+        .font(.system(size: compact ? 12 : 13))
         .lineLimit(1)
-        .frame(height: 40)
+        .frame(height: compact ? 30 : 40)
         .fixedSize()
     }
 }
@@ -158,12 +161,13 @@ private struct NoticeContent: View {
 struct StatusBadge: View {
     let symbol: String
     let fill: Color
+    @Environment(\.controlSize) private var size
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: 10, weight: .heavy))
+            .font(.system(size: size == .small ? 8.5 : 10, weight: .heavy))
             .foregroundStyle(.white)
-            .frame(width: 22, height: 22)
+            .frame(width: size == .small ? 18 : 22, height: size == .small ? 18 : 22)
             .background(fill, in: .circle)
     }
 }
@@ -171,13 +175,14 @@ struct StatusBadge: View {
 struct PillButton: View {
     let title: String
     let action: () -> Void
+    @Environment(\.controlSize) private var size
 
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 12, weight: .medium))
-                .padding(.horizontal, 11)
-                .frame(height: 26)
+                .font(.system(size: size == .small ? 11 : 12, weight: .medium))
+                .padding(.horizontal, size == .small ? 9 : 11)
+                .frame(height: size == .small ? 22 : 26)
                 .background(.quaternary, in: .capsule)
                 .contentShape(.capsule)
         }

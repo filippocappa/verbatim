@@ -20,10 +20,12 @@ final class MeetingNotes {
     private let log = Logger(subsystem: AppInfo.bundleID, category: "meetings")
 
     private let bundleID: String
+    private let service: String?
 
-    init(title: String, bundleID: String, started: Date) {
+    init(title: String, bundleID: String, service: String?, started: Date) {
         self.title = title
         self.bundleID = bundleID
+        self.service = service
         self.started = started
         let folder = Self.folder
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -157,7 +159,7 @@ final class MeetingNotes {
     private func write(recap: String?) {
         if let recap { recapText = recap }
         let when = started.formatted(date: .complete, time: .shortened)
-        var md = "# \(title)\n\n<!-- verbatim app=\(bundleID) started=\(Int(started.timeIntervalSince1970)) -->\n\n\(when)\n\n"
+        var md = "# \(title)\n\n<!-- verbatim app=\(bundleID) service=\(service ?? "") started=\(Int(started.timeIntervalSince1970)) -->\n\n\(when)\n\n"
         md += "## Recap\n\n" + (recapText ?? "_Written when the call ends._") + "\n\n"
         md += "## Transcript\n\n"
         md += cleanLines.map { "**\(stamp($0.at)) \($0.them ? "Them" : "You"):** \($0.text)" }.joined(separator: "\n\n")

@@ -9,7 +9,11 @@ Meeting notes, without a bot joining the call. Built so far:
 - **Noticing calls.** When one of those apps starts using the mic, a pill asks "Zoom call · Take notes?". It stays until you answer it or the call ends, with a soft sound when it appears (a 12-second offer was too easy to miss). It doesn't ask again for the same call.
 - **Meetings page** in the sidebar (⌘4). Every meeting, by day, with the app's icon, time and length. On the right: the recap (summary, decisions, action items you can tick, open questions) and the transcript with times and You / Them. Search, Copy Notes, Open in Editor, Show in Finder, Move to Trash. While a call is being written down it updates by itself. The toolbar has Take Notes / Stop. The other pages moved one number along (Dictionary is now ⌘5).
 - Very short calls (under about 40 words) get "Too short for a recap" instead of a made-up summary.
-- **Meeting messages come down from the notch**, as a black shape growing out of it, instead of the pill at the bottom, which covered the call's own buttons. On a screen without a notch they hang from the top edge. The dictation pill stays at the bottom, so the two never collide.
+- **Settings → General → Where it shows: Pill or Notch.**
+  - *Pill* (default): dictation at the bottom as before; call messages use the same glass pill but at the top, under the menu bar, so they don't cover the call's buttons.
+  - *Notch*: everything, dictation included, drops down from the notch as a small black island.
+- **The call's own logo**: a call in the browser shows the Meet / Teams / Webex / Zoom logo instead of Safari's or Chrome's, in the offer and on the Meetings page. The logos are fetched once and kept on the Mac.
+- The offer is shorter: logo, "Google Meet", Take Notes, ✕.
 - A Meet call in Safari is no longer mistaken for FaceTime. FaceTime only counts when the FaceTime app is open.
 - **While taking notes:** the menu bar shows a record icon and the time. The menu has the "Taking notes" row with Stop, or "Take Notes" for a call it didn't notice.
 - **Stops by itself** about 20 seconds after the call app lets go of the mic.
