@@ -98,12 +98,16 @@ enum DockPolicy {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pill: PillPanel?
+    private var notch: NotchPanel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let controller = DictationController.shared
         let pill = PillPanel(controller: controller)
         self.pill = pill
         controller.onPhaseChange = { [weak pill] phase in pill?.update(for: phase) }
+        let notch = NotchPanel(controller: controller)
+        self.notch = notch
+        controller.onMeetingChange = { [weak notch] pill in notch?.update(for: pill) }
         controller.start()
         MeetingController.shared.startWatching()
         DockPolicy.start()

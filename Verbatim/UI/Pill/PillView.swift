@@ -119,9 +119,6 @@ struct PillContent: View {
 
             case let .notice(notice):
                 NoticeContent(notice: notice)
-
-            case let .meeting(pill):
-                MeetingContent(pill: pill)
             }
         }
         .font(.system(size: 13))
@@ -158,102 +155,7 @@ private struct NoticeContent: View {
     }
 }
 
-private struct MeetingContent: View {
-    let pill: DictationController.MeetingPill
-
-    var body: some View {
-        switch pill {
-        case let .offer(_, title, bundleID):
-            HStack(spacing: 9) {
-                AppIcon(bundleID: bundleID)
-                Text(title)
-                Text("Take notes?").foregroundStyle(.secondary)
-                PillButton(title: "Take Notes") { MeetingController.shared.start() }
-                Button { DictationController.shared.dismiss() } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 26, height: 26)
-                        .contentShape(.circle)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.leading, 9)
-            .padding(.trailing, 7)
-
-        case let .started(title):
-            HStack(spacing: 9) {
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 8))
-                    .foregroundStyle(.red)
-                    .shadow(color: .red.opacity(0.7), radius: 4)
-                Text("Taking notes")
-                Text("\(title) · let the others know").foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 16)
-
-        case .stopped:
-            HStack(spacing: 9) {
-                StatusBadge(symbol: "stop.fill", fill: .secondary)
-                Text("Stopped taking notes")
-            }
-            .padding(.leading, 9)
-            .padding(.trailing, 16)
-
-        case .cantHear:
-            HStack(spacing: 9) {
-                Image(systemName: "speaker.slash").foregroundStyle(.orange)
-                Text("Can't hear the call")
-                PillButton(title: "Open Settings") { Permissions.openSystemAudioSettings() }
-            }
-            .padding(.leading, 15)
-            .padding(.trailing, 7)
-
-        case .writingNotes:
-            HStack(spacing: 9) {
-                ProgressView().controlSize(.small)
-                Text("Writing your meeting notes")
-            }
-            .padding(.horizontal, 16)
-
-        case let .saved(file):
-            HStack(spacing: 9) {
-                StatusBadge(symbol: "checkmark", fill: .green)
-                Text("Meeting notes ready")
-                PillButton(title: "Open") {
-                    NSWorkspace.shared.open(file)
-                    DictationController.shared.dismiss()
-                }
-            }
-            .padding(.leading, 9)
-            .padding(.trailing, 7)
-
-        case let .failed(message):
-            HStack(spacing: 9) {
-                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
-                Text(message).truncationMode(.tail).frame(maxWidth: 340, alignment: .leading)
-            }
-            .padding(.horizontal, 15)
-        }
-    }
-}
-
-/// The meeting app's own icon, small.
-private struct AppIcon: View {
-    let bundleID: String
-
-    var body: some View {
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
-                .resizable()
-                .frame(width: 22, height: 22)
-        } else {
-            StatusBadge(symbol: "video.fill", fill: .secondary)
-        }
-    }
-}
-
-private struct StatusBadge: View {
+struct StatusBadge: View {
     let symbol: String
     let fill: Color
 
@@ -266,7 +168,7 @@ private struct StatusBadge: View {
     }
 }
 
-private struct PillButton: View {
+struct PillButton: View {
     let title: String
     let action: () -> Void
 

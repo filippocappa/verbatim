@@ -14,6 +14,8 @@ final class MeetingWatcher {
         /// Every process to listen to: the app and its helpers, which are often the ones playing the sound.
         let prefixes: [String]
         let isBrowser: Bool
+        /// Only counts while the app itself is open (FaceTime shares its call service with Safari).
+        var needsAppOpen = false
     }
 
     /// The call going on right now: which app, and what it looks like ("Google Meet" in Chrome).
@@ -36,7 +38,7 @@ final class MeetingWatcher {
         App(name: "Zoom", bundleID: "us.zoom.xos", prefixes: ["us.zoom"], isBrowser: false),
         App(name: "Webex", bundleID: "Cisco-Systems.Spark", prefixes: ["Cisco-Systems.Spark", "com.cisco.webex"], isBrowser: false),
         App(name: "Teams", bundleID: "com.microsoft.teams2", prefixes: ["com.microsoft.teams"], isBrowser: false),
-        App(name: "FaceTime", bundleID: "com.apple.FaceTime", prefixes: ["com.apple.FaceTime", "com.apple.avconferenced"], isBrowser: false),
+        App(name: "FaceTime", bundleID: "com.apple.FaceTime", prefixes: ["com.apple.FaceTime", "com.apple.avconferenced"], isBrowser: false, needsAppOpen: true),
         App(name: "Slack", bundleID: "com.tinyspeck.slackmacgap", prefixes: ["com.tinyspeck.slackmacgap"], isBrowser: false),
         App(name: "Discord", bundleID: "com.hnc.Discord", prefixes: ["com.hnc.Discord"], isBrowser: false),
         App(name: "Chrome", bundleID: "com.google.Chrome", prefixes: ["com.google.Chrome"], isBrowser: true),
@@ -46,7 +48,7 @@ final class MeetingWatcher {
         App(name: "Brave", bundleID: "com.brave.Browser", prefixes: ["com.brave.Browser"], isBrowser: true),
         App(name: "Firefox", bundleID: "org.mozilla.firefox", prefixes: ["org.mozilla"], isBrowser: true),
         // Safari's sound and mic go through WebKit's shared helper.
-        App(name: "Safari", bundleID: "com.apple.Safari", prefixes: ["com.apple.Safari", "com.apple.WebKit.GPU"], isBrowser: true),
+        App(name: "Safari", bundleID: "com.apple.Safari", prefixes: ["com.apple.Safari", "com.apple.WebKit.GPU", "com.apple.avconferenced"], isBrowser: true),
     ]
 
     /// Browser window titles that mean a call, and the name to show for it.
@@ -84,7 +86,10 @@ final class MeetingWatcher {
             Logger(subsystem: AppInfo.bundleID, category: "meetings").info("mic in use by: \(busy.map(\.description).joined(separator: ", "), privacy: .public)")
         }
         #endif
-        let apps = Self.apps.filter { app in busy.contains { p in app.prefixes.contains { p.bundleID.hasPrefix($0) } } }
+        let apps = Self.apps.filter { app in
+            busy.contains { p in app.prefixes.contains { p.bundleID.hasPrefix($0) } }
+                && (!app.needsAppOpen || !NSRunningApplication.runningApplications(withBundleIdentifier: app.bundleID).isEmpty)
+        }
         // A dedicated call app wins over a browser that happens to use the mic.
         if let app = apps.first(where: { !$0.isBrowser }) { return Call(app: app, title: "\(app.name) call") }
         for app in apps {
@@ -98,7 +103,8 @@ final class MeetingWatcher {
         let now = detect()
         if let now {
             lastSeen = Date()
-            if current == nil || current?.app != now.app {
+            // A new call, or the same one now with a clearer name ("Call in Safari" → "Google Meet in Safari").
+            if current == nil || current?.app != now.app || (current?.title.hasPrefix("Call in") == true && now.title != current?.title) {
                 current = now
                 onChange?(now)
             }
@@ -127,6 +133,8 @@ final class MeetingWatcher {
                 AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &title)
                 guard let t = title as? String else { continue }
                 if let hit = webCalls.first(where: { t.contains($0.match) }) { return hit.name }
+                // Meet's waiting room is titled just "Meet".
+                if t == "Meet" || t.hasPrefix("Meet ") { return "Google Meet" }
             }
         }
         return nil

@@ -39,15 +39,12 @@ final class DictationController {
         /// A command ran: "Opened YouTube", "Rewrote", "Searched Google · lo-fi".
         case done(symbol: String, title: String, detail: String?)
         case notice(Notice)
-        /// Meeting notes: the offer when a call starts, and what happens after.
-        case meeting(MeetingPill)
 
         var isBusy: Bool { self == .listening || self == .writing }
         /// The pill takes clicks only when it has a button.
         var isInteractive: Bool {
             switch self {
-            case .learned, .notice(.needsAccessibility), .notice(.micDenied),
-                 .meeting(.offer), .meeting(.cantHear), .meeting(.saved): true
+            case .learned, .notice(.needsAccessibility), .notice(.micDenied): true
             default: false
             }
         }
@@ -76,6 +73,13 @@ final class DictationController {
     let connectivity = Connectivity()
 
     @ObservationIgnored var onPhaseChange: ((Phase) -> Void)?
+
+    /// Meeting messages, shown from the notch, separate from the dictation pill so the two never collide.
+    private(set) var meetingPill: MeetingPill? {
+        didSet { if meetingPill != oldValue { onMeetingChange?(meetingPill) } }
+    }
+    @ObservationIgnored var onMeetingChange: ((MeetingPill?) -> Void)?
+    @ObservationIgnored private var meetingDismiss: Task<Void, Never>?
 
     static let levelCount = 22
 
@@ -630,10 +634,7 @@ final class DictationController {
         if !phase.isBusy { phase = .idle }
     }
 
-    /// Meeting pills never interrupt a dictation in progress; they wait for the next quiet moment instead
-    /// (an offer that would arrive mid-dictation is simply skipped; the menu bar still has "Take notes").
     func showMeeting(_ pill: MeetingPill) {
-        guard !phase.isBusy else { return }
         let seconds: Double = switch pill {
         // Stays until answered or the call ends: a 12 s offer was easy to miss while talking.
         case .offer: 4 * 3600
@@ -644,12 +645,23 @@ final class DictationController {
         case .saved: 10
         case .failed: 5
         }
-        show(.meeting(pill), for: seconds)
+        meetingPill = pill
+        meetingDismiss?.cancel()
+        meetingDismiss = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled, let self, self.meetingPill == pill else { return }
+            self.meetingPill = nil
+        }
+    }
+
+    func dismissMeeting() {
+        meetingDismiss?.cancel()
+        meetingPill = nil
     }
 
     /// The call ended before anyone answered the offer.
     func dismissMeetingOffer() {
-        if case .meeting(.offer) = phase { dismiss() }
+        if case .offer = meetingPill { dismissMeeting() }
     }
 
     // MARK: Other actions
