@@ -226,7 +226,7 @@ private struct TryItStep: View {
     var body: some View {
         VStack(alignment: .leading) {
             StepHeader(step: 4, title: "Try it here",
-                       text: "Click in the box, double-tap ⌘, say a sentence, then tap ⌘ once.")
+                       text: "Click in the box, double-tap the right ⌘, say a sentence, then tap it once.")
             TextEditor(text: $text)
                 .font(.body)
                 .scrollContentBackground(.hidden)

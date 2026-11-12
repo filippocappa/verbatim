@@ -90,11 +90,11 @@ private struct SidebarFooter: View {
             EngineStatus()
             HStack(spacing: 8) {
                 KeyCaps(keys: ["⌘", "⌘"])
-                Text("double-tap to dictate").font(.caption).foregroundStyle(.secondary)
+                Text("right ⌘ twice to dictate").font(.caption).foregroundStyle(.secondary)
             }
             HStack(spacing: 8) {
                 KeyCaps(keys: ["⌥", "⌥"])
-                Text("double-tap for a command").font(.caption).foregroundStyle(.secondary)
+                Text("right ⌥ twice for a command").font(.caption).foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -149,10 +149,10 @@ private struct GeneralSettings: View {
             }
 
             SettingsGroup(title: "Shortcuts") {
-                SettingsRow(symbol: "mic", title: "Dictate", detail: "Double-tap to start, tap once to stop and paste.") {
+                SettingsRow(symbol: "mic", title: "Dictate", detail: "Double-tap the right ⌘ to start, tap it once to stop and paste.") {
                     KeyCaps(keys: ["⌘", "⌘"])
                 }
-                SettingsRow(symbol: "command", title: "Command", detail: "Rewrite the selection, or open and search.") {
+                SettingsRow(symbol: "command", title: "Command", detail: "Double-tap the right ⌥. Rewrite the selection, or open and search.") {
                     KeyCaps(keys: ["⌥", "⌥"])
                 }
                 SettingsRow(symbol: "xmark", title: "Throw it away", detail: "While recording or writing.") {
@@ -373,7 +373,7 @@ private struct PermissionSettings: View {
 
     var body: some View {
         SettingsPage {
-            SettingsGroup(title: "\(AppInfo.name) needs", footer: "Nothing is recorded unless you double-tap ⌘ or ⌥.") {
+            SettingsGroup(title: "\(AppInfo.name) needs", footer: "Nothing is recorded unless you double-tap the right ⌘ or ⌥.") {
                 SettingsRow(symbol: "mic", title: "Microphone", detail: "To hear what you say.") {
                     status(mic == .allowed) {
                         if mic == .notAsked {

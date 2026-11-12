@@ -55,7 +55,7 @@ struct HomeView: View {
     }
 
     private func subtitle(_ stats: Stats) -> String {
-        guard stats.todayDictations > 0 else { return "Double-tap ⌘ anywhere and start talking." }
+        guard stats.todayDictations > 0 else { return "Double-tap the right ⌘ anywhere and start talking." }
         let saved = stats.todayWords > 0
             ? Format.duration(Double(stats.todayWords) / Double(stats.typingWPM) * 60)
             : "0m"
@@ -294,7 +294,7 @@ private struct EmptyHome: View {
         Panel(padding: 28) {
             VStack(alignment: .leading, spacing: 10) {
                 KeyCaps(keys: ["⌘", "⌘"])
-                Text("Double-tap Command in any app, talk, then tap ⌘ once more.")
+                Text("Double-tap the right Command key in any app, talk, then tap it once more.")
                     .font(.title3)
                 Text("Your words land where the cursor is. Stats and history show up here after the first one.")
                     .foregroundStyle(.secondary)

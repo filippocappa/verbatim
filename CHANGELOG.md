@@ -2,6 +2,11 @@
 
 Newest first. Each entry says what changed and where to find it.
 
+
+## 12 November 2026, right-hand keys only
+
+- **Only the right ⌘ and the right ⌥ start dictation and commands** (and stop them). The left keys are now free for normal shortcuts. Every hint in the app says "right ⌘" / "right ⌥".
+
 ## 12 November 2026, meetings (in progress)
 
 Meeting notes, without a bot joining the call. Built so far:

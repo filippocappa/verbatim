@@ -1,12 +1,19 @@
 import AppKit
 
-/// Detects a "clean" tap of one modifier key (⌘ for dictation, ⌥ for commands): pressed and released
-/// quickly with no other key, click or modifier in between.
+/// Detects a "clean" tap of the right-hand copy of one modifier key (right ⌘ for dictation, right ⌥ for
+/// commands): pressed and released quickly with no other key, click or modifier in between.
+/// The left keys are left alone, so normal shortcuts like ⌘C never count.
 /// The controller decides what a tap means (double tap to start, single tap to stop).
 @MainActor
 final class ModifierTapMonitor {
     let modifier: NSEvent.ModifierFlags
-    init(_ modifier: NSEvent.ModifierFlags) { self.modifier = modifier }
+    /// The device bits macOS sets for each side (NX_DEVICER/LCMDKEYMASK, NX_DEVICER/LALTKEYMASK).
+    private let right: UInt
+    private let left: UInt
+    init(_ modifier: NSEvent.ModifierFlags) {
+        self.modifier = modifier
+        (right, left) = modifier == .option ? (0x40, 0x20) : (0x10, 0x08)
+    }
 
     var onTap: ((TimeInterval) -> Void)?
     var onEscape: (() -> Void)?
@@ -35,8 +42,11 @@ final class ModifierTapMonitor {
 
     private func flagsChanged(_ e: NSEvent) {
         let mods = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        let cmd = mods.contains(modifier)
+        let raw = e.modifierFlags.rawValue
+        let cmd = raw & right != 0
+        // The left copy of the same key counts as "another key", like Shift would.
         let others = !mods.intersection([.shift, .option, .control, .command]).subtracting(modifier).isEmpty
+            || raw & left != 0
 
         if cmd, downAt == nil {
             downAt = e.timestamp

@@ -21,7 +21,7 @@ struct CommandsView: View {
                         .font(.pageTitle)
                     HStack(spacing: 8) {
                         KeyCaps(keys: ["⌥", "⌥"])
-                        Text("Double-tap Option, say what you want, then tap Option once to run it.")
+                        Text("Double-tap the right Option key, say what you want, then tap it once to run it.")
                             .foregroundStyle(.secondary)
                     }
                 }

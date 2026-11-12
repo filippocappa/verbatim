@@ -19,7 +19,7 @@ struct StatsView: View {
                 header(info)
                     .padding(.bottom, 4)
                 if history.isEmpty {
-                    Text("Your numbers show up here after the first dictation. Double-tap ⌘ in any app and talk.")
+                    Text("Your numbers show up here after the first dictation. Double-tap the right ⌘ in any app and talk.")
                         .foregroundStyle(.secondary)
                 } else {
                     Numbers(stats: stats, info: info, recent: Array(history.prefix(20).reversed()))
