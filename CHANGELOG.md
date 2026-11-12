@@ -6,7 +6,7 @@ Newest first. Each entry says what changed and where to find it.
 
 Meeting notes, without a bot joining the call. Built so far:
 - **Hearing the call.** Verbatim can listen to just the meeting app (Zoom, Meet in a browser, Webex, Teams, FaceTime, Slack, Discord) plus your mic, as two separate sides.
-- **Noticing calls.** When one of those apps starts using the mic, a pill asks "Zoom call · Take notes?". It goes away after 12 seconds if you ignore it, and doesn't ask again for the same call.
+- **Noticing calls.** When one of those apps starts using the mic, a pill asks "Zoom call · Take notes?". It stays until you answer it or the call ends, with a soft sound when it appears (a 12-second offer was too easy to miss). It doesn't ask again for the same call.
 - **While taking notes:** the menu bar shows a record icon and the time. The menu has the "Taking notes" row with Stop, or "Take Notes" for a call it didn't notice.
 - **Stops by itself** about 20 seconds after the call app lets go of the mic.
 - If the call stays silent for 20 seconds, the pill says "Can't hear the call" with a button to the permission setting.

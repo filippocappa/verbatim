@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Observation
 import os
 
@@ -49,6 +49,7 @@ final class MeetingController {
             offered = call
             log.notice("offering notes, pill was: \(String(describing: DictationController.shared.phase), privacy: .public)")
             DictationController.shared.showMeeting(.offer(app: call.app.name, title: call.title, bundleID: call.app.bundleID))
+            if Prefs.sounds { NSSound(named: "Tink")?.play() }
             #if DEBUG
             if UserDefaults.standard.bool(forKey: "autoTakeNotes") { start(call) }
             #endif

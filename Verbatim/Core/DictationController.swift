@@ -635,7 +635,8 @@ final class DictationController {
     func showMeeting(_ pill: MeetingPill) {
         guard !phase.isBusy else { return }
         let seconds: Double = switch pill {
-        case .offer: 12
+        // Stays until answered or the call ends: a 12 s offer was easy to miss while talking.
+        case .offer: 4 * 3600
         case .started: 4
         case .stopped: 2.5
         case .cantHear: 10
