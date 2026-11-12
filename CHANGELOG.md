@@ -20,7 +20,7 @@ Newest first. Each entry says what changed and where to find it.
 
 - **Only the right ⌘ and the right ⌥ start dictation and commands** (and stop them). The left keys are now free for normal shortcuts. Every hint in the app says "right ⌘" / "right ⌥".
 
-## 12 November 2026, meetings (in progress)
+## 12 November 2026, meetings
 
 Meeting notes, without a bot joining the call. Built so far:
 - **Hearing the call.** Verbatim can listen to just the meeting app (Zoom, Meet in a browser, Webex, Teams, FaceTime, Slack, Discord) plus your mic, as two separate sides.
@@ -41,7 +41,7 @@ Meeting notes, without a bot joining the call. Built so far:
 - If the mic picks up the others through the speakers, those repeated lines are dropped.
 - The call doesn't end while you're muted, as long as the call app is still playing sound.
 
-Not yet: the Meetings page inside the app. No audio is saved.
+No audio is saved.
 
 ## 12 November 2026, afternoon
 
