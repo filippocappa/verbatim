@@ -32,6 +32,11 @@ enum Permissions {
         open("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
     }
 
+    /// Screen & System Audio Recording, where "System Audio Recording Only" lists Verbatim.
+    static func openSystemAudioSettings() {
+        open("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+    }
+
     private static func open(_ s: String) {
         if let url = URL(string: s) { NSWorkspace.shared.open(url) }
     }

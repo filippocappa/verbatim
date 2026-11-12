@@ -105,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.pill = pill
         controller.onPhaseChange = { [weak pill] phase in pill?.update(for: phase) }
         controller.start()
+        MeetingController.shared.startWatching()
         DockPolicy.start()
 
         #if DEBUG

@@ -7,7 +7,19 @@ struct MenuBarLabel: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        Image(systemName: symbol)
+        Group {
+            // While taking meeting notes: a record dot and the time, so it's clear the call is being heard.
+            // (Not a TimelineView: inside the menu bar label it redraws in a loop and freezes the app.)
+            if MeetingController.shared.isRecording {
+                let s = MeetingController.shared.elapsed
+                Label(s >= 3600 ? "\(s / 3600)h \(s / 60 % 60)m" : "\(s / 60):\(String(format: "%02d", s % 60))",
+                      systemImage: "record.circle")
+                    .labelStyle(.titleAndIcon)
+                    .monospacedDigit()
+            } else {
+                Image(systemName: symbol)
+            }
+        }
             .onAppear {
                 WindowRouter.openWindow = openWindow
                 WindowRouter.openSettings = openSettings
@@ -75,6 +87,8 @@ struct MenuBarView: View {
                 .background(.fill.quaternary, in: .rect(cornerRadius: 10))
             }
 
+            MeetingRow()
+
             Divider()
 
             VStack(spacing: 2) {
@@ -92,6 +106,38 @@ struct MenuBarView: View {
         }
         .padding(14)
         .frame(width: 300)
+    }
+}
+
+/// Taking notes right now (with Stop), or a button to start for a call it didn't notice.
+private struct MeetingRow: View {
+    private var meetings: MeetingController { .shared }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if case let .recording(call, started) = meetings.state {
+                Image(systemName: "circle.fill").font(.system(size: 8)).foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Taking notes").font(.callout.weight(.medium))
+                    HStack(spacing: 0) {
+                        Text("\(call.title) · ")
+                        Text(started, style: .timer).monospacedDigit()
+                    }
+                    .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Stop") { meetings.stop() }
+                    .buttonStyle(.glass).controlSize(.small)
+            } else {
+                Image(systemName: "person.2.wave.2").foregroundStyle(.secondary)
+                Text("Meeting notes").font(.callout)
+                Spacer()
+                Button("Take Notes") { meetings.start() }
+                    .buttonStyle(.glass).controlSize(.small)
+            }
+        }
+        .padding(10)
+        .background(.fill.quaternary, in: .rect(cornerRadius: 10))
     }
 }
 

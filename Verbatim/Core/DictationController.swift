@@ -17,6 +17,15 @@ final class DictationController {
         case failed(String)
     }
 
+    enum MeetingPill: Equatable {
+        case offer(app: String, title: String, bundleID: String)
+        case started(title: String)
+        case stopped
+        /// Recording, but the call is silent: almost always the System Audio Recording permission.
+        case cantHear
+        case failed(String)
+    }
+
     enum Phase: Equatable {
         case idle
         case listening
@@ -28,12 +37,15 @@ final class DictationController {
         /// A command ran: "Opened YouTube", "Rewrote", "Searched Google · lo-fi".
         case done(symbol: String, title: String, detail: String?)
         case notice(Notice)
+        /// Meeting notes: the offer when a call starts, and what happens after.
+        case meeting(MeetingPill)
 
         var isBusy: Bool { self == .listening || self == .writing }
         /// The pill takes clicks only when it has a button.
         var isInteractive: Bool {
             switch self {
-            case .learned, .notice(.needsAccessibility), .notice(.micDenied): true
+            case .learned, .notice(.needsAccessibility), .notice(.micDenied),
+                 .meeting(.offer), .meeting(.cantHear): true
             default: false
             }
         }
@@ -614,6 +626,25 @@ final class DictationController {
     func dismiss() {
         dismissTask?.cancel()
         if !phase.isBusy { phase = .idle }
+    }
+
+    /// Meeting pills never interrupt a dictation in progress; they wait for the next quiet moment instead
+    /// (an offer that would arrive mid-dictation is simply skipped; the menu bar still has "Take notes").
+    func showMeeting(_ pill: MeetingPill) {
+        guard !phase.isBusy else { return }
+        let seconds: Double = switch pill {
+        case .offer: 12
+        case .started: 4
+        case .stopped: 2.5
+        case .cantHear: 10
+        case .failed: 5
+        }
+        show(.meeting(pill), for: seconds)
+    }
+
+    /// The call ended before anyone answered the offer.
+    func dismissMeetingOffer() {
+        if case .meeting(.offer) = phase { dismiss() }
     }
 
     // MARK: Other actions

@@ -14,6 +14,8 @@ nonisolated final class AudioRecorder: @unchecked Sendable {
     private var renderBuffer: AVAudioPCMBuffer?
     private let lock = NSLock()
     private var samples: [Float] = []
+    /// Samples dropped from the front with `discard(upTo:)`. Positions keep counting from the start.
+    private var base = 0
     private var peakRMS: Float = 0
     private var converter: AVAudioConverter?
     private let outFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false)!
@@ -27,7 +29,7 @@ nonisolated final class AudioRecorder: @unchecked Sendable {
     /// - Parameter device: the mic to use, or nil for the system default.
     func start(device: Microphone.Device? = nil) throws {
         guard !isRunning else { return }
-        lock.lock(); samples.removeAll(keepingCapacity: true); peakRMS = 0; lock.unlock()
+        lock.lock(); samples.removeAll(keepingCapacity: true); base = 0; peakRMS = 0; lock.unlock()
 
         func fail(_ what: String, _ status: OSStatus) -> NSError {
             NSError(domain: "Verbatim", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "\(what) (\(status))"])
@@ -86,13 +88,24 @@ nonisolated final class AudioRecorder: @unchecked Sendable {
     }
 
     /// How many samples are recorded so far.
-    var sampleCount: Int { lock.lock(); defer { lock.unlock() }; return samples.count }
+    var sampleCount: Int { lock.lock(); defer { lock.unlock() }; return base + samples.count }
 
     /// A copy of part of the recording so far, for sending the start of a long dictation early.
+    /// Positions count from the start of the recording; anything already discarded is skipped.
     func samples(from start: Int, to end: Int) -> [Float] {
         lock.lock(); defer { lock.unlock() }
-        let e = min(end, samples.count)
-        return start < e ? Array(samples[start..<e]) : []
+        let s = max(start - base, 0), e = min(end - base, samples.count)
+        return s < e ? Array(samples[s..<e]) : []
+    }
+
+    /// Frees everything before `position`. Meetings call this once a stretch is transcribed,
+    /// so an hour-long call stays small. Dictation never does.
+    func discard(upTo position: Int) {
+        lock.lock(); defer { lock.unlock() }
+        let n = min(max(position - base, 0), samples.count)
+        guard n > 0 else { return }
+        samples.removeFirst(n)
+        base += n
     }
 
     /// Stops capture and returns everything recorded.

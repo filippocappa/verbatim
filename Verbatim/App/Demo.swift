@@ -22,6 +22,17 @@ enum Demo {
             Task { await testTap(prefix == "all" ? [] : [prefix], seconds: max(d.double(forKey: "tapSeconds"), 8)); exit(0) }
             return
         }
+        // -meetingPill offer|started|cantHear: shows that pill, for screenshots.
+        if let pill = d.string(forKey: "meetingPill") {
+            Task {
+                try? await Task.sleep(for: .seconds(1))
+                switch pill {
+                case "started": controller.showMeeting(.started(title: "Google Meet in Chrome"))
+                case "cantHear": controller.showMeeting(.cantHear)
+                default: controller.showMeeting(.offer(app: "Zoom", title: "Zoom call", bundleID: "us.zoom.xos"))
+                }
+            }
+        }
         if d.bool(forKey: "probeMic") {
             for m in Microphone.inputs() { print("input:", m.name, m.uid, m.isBluetooth ? "bluetooth" : m.isBuiltIn ? "built-in" : "other") }
             print("system default:", Microphone.systemDefault()?.name ?? "none")
