@@ -66,7 +66,7 @@ struct MeetingsView: View {
         Group {
             if meetings.isEmpty {
                 ContentUnavailableView {
-                    Label("No meetings yet", systemImage: "person.2.wave.2")
+                    Label("No meetings yet", systemImage: "video")
                 } description: {
                     Text("When a call starts in Zoom, Meet, Teams or another call app, \(AppInfo.name) offers to take notes. Each meeting gets a recap and a transcript here.")
                 } actions: {

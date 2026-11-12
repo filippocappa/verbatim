@@ -129,7 +129,7 @@ private struct MeetingRow: View {
                 Button("Stop") { meetings.stop() }
                     .buttonStyle(.glass).controlSize(.small)
             } else {
-                Image(systemName: "person.2.wave.2").foregroundStyle(.secondary)
+                Image(systemName: "video").foregroundStyle(.secondary)
                 Text("Meeting notes").font(.callout)
                 Spacer()
                 Button("Take Notes") { meetings.start() }

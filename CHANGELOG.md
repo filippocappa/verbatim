@@ -12,6 +12,7 @@ Newest first. Each entry says what changed and where to find it.
   - Each has Download (with progress), Use, and a bin to delete it and free the space. The first time after downloading it gets ready for the Mac's chip: under a minute for Parakeet, about 10 minutes for Whisper.
 - **Speech goes to: Groq first, or Only this Mac.** With *Groq first*, a downloaded model replaces Apple's engine as the backup when you're offline or Groq is slow. With *Only this Mac*, your voice never leaves the Mac. Cleanup still uses Groq, text only.
 - Meeting notes follow the same choice.
+- The Meetings icon in the sidebar is now a camera, the same width as the others, so the names line up.
 - History shows which engine wrote each dictation (Groq, Parakeet, Whisper or Apple), and the status under the app name says which local model is ready.
 - The model loads while you talk and is unloaded after 10 idle minutes, so it doesn't take memory when you're not dictating.
 

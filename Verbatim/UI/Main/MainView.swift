@@ -23,7 +23,7 @@ enum Page: String, CaseIterable, Identifiable {
         case .home: "house"
         case .stats: "chart.bar.xaxis"
         case .history: "clock"
-        case .meetings: "person.2.wave.2"
+        case .meetings: "video"
         case .dictionary: "character.book.closed"
         case .snippets: "text.quote"
         case .style: "textformat"
