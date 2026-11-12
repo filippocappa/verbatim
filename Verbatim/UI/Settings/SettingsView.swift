@@ -160,18 +160,12 @@ private struct GeneralSettings: View {
                 }
             }
 
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Where it shows").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).padding(.leading, 4)
+                PlacePicker(place: $place)
+            }
+
             SettingsGroup(title: "While you dictate") {
-                SettingsRow(symbol: "capsule.portrait", title: "Where it shows",
-                            detail: place == "notch" ? "Everything drops down from the notch, small and black."
-                                                     : "Dictation at the bottom. Call messages at the top, so they don't cover the call's buttons.") {
-                    Picker("", selection: $place) {
-                        Text("Pill").tag("pill")
-                        Text("Notch").tag("notch")
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
-                }
                 SettingsRow(symbol: "speaker.wave.2", title: "Sounds", detail: "A short sound when it starts and stops.") {
                     Switch(isOn: $sounds)
                 }
@@ -488,3 +482,143 @@ struct GroqKeyField: View {
     }
 }
 
+
+// MARK: - Pill or Notch
+
+/// Two small screens, each playing what you'd see: a dictation, then a call offer. Click one to pick it.
+private struct PlacePicker: View {
+    @Binding var place: String
+    /// false: dictating. true: a call just started.
+    @State private var call = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            card("pill", title: "Pill", detail: "Dictation at the bottom. Calls at the top, clear of the call's buttons.")
+            card("notch", title: "Notch", detail: "Everything drops down from the notch, small and black.")
+        }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2.4))
+                withAnimation(.spring(duration: 0.45, bounce: 0.22)) { call.toggle() }
+            }
+        }
+    }
+
+    private func card(_ value: String, title: String, detail: String) -> some View {
+        let selected = place == value
+        return Button { withAnimation(.snappy) { place = value } } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                MiniScreen(notch: value == "notch", call: call)
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selected ? .primary : .tertiary)
+                        .font(.system(size: 14))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.callout.weight(.medium))
+                        Text(detail).font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .padding(10)
+            .background(.fill.quinary, in: .rect(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.separator.opacity(0.6)), lineWidth: selected ? 1.5 : 0.5))
+            .contentShape(.rect(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// A tiny Mac screen: menu bar, notch, and the pill or island where it would really be.
+private struct MiniScreen: View {
+    let notch: Bool
+    let call: Bool
+
+    private let menuBar: CGFloat = 11
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            LinearGradient(colors: [Color(white: 0.42), Color(white: 0.22)], startPoint: .top, endPoint: .bottom)
+            // Menu bar, and the notch in it.
+            Rectangle().fill(.black.opacity(0.28)).frame(height: menuBar)
+
+            if notch {
+                island
+            } else {
+                UnevenRoundedRectangle(bottomLeadingRadius: 4, bottomTrailingRadius: 4).fill(.black)
+                    .frame(width: 42, height: menuBar)
+                if call {
+                    MiniCall().glassEffect(.regular, in: .capsule)
+                        .padding(.top, menuBar + 5)
+                        .transition(.opacity.combined(with: .scale(0.8, anchor: .top)))
+                } else {
+                    MiniDictation().glassEffect(.regular, in: .capsule)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                        .padding(.bottom, 8)
+                        .transition(.opacity.combined(with: .scale(0.8, anchor: .bottom)))
+                }
+            }
+        }
+        .environment(\.colorScheme, .dark)
+        .frame(height: 150)
+        .clipShape(.rect(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.black.opacity(0.25), lineWidth: 0.5))
+        .allowsHitTesting(false)
+    }
+
+    /// The black island, grown out of the notch.
+    private var island: some View {
+        ZStack {
+            Group {
+                if call { MiniCall() } else { MiniDictation() }
+            }
+            .id(call)
+            .transition(.opacity.combined(with: .scale(0.85, anchor: .top)))
+        }
+        .padding(.top, menuBar)
+        .padding(.horizontal, 2)
+        .padding(.bottom, 2)
+        .frame(minWidth: 42)
+        .background(NotchShape(bottomRadius: 9, topRadius: 3).fill(.black))
+    }
+}
+
+/// The dictation pill, shrunk: record dot, voice bars, time.
+private struct MiniDictation: View {
+    private let bars: [CGFloat] = [3, 5, 8, 6, 10, 7, 4, 9, 6, 3, 5, 7, 4, 2]
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(.red).frame(width: 4, height: 4)
+            HStack(spacing: 1.2) {
+                ForEach(bars.indices, id: \.self) { i in
+                    Capsule().fill(.white).frame(width: 1.5, height: bars[i])
+                }
+            }
+            Text("0:04").font(.system(size: 6.5)).foregroundStyle(.secondary).monospacedDigit()
+        }
+        .padding(.horizontal, 7)
+        .frame(height: 17)
+    }
+}
+
+/// The call offer, shrunk: logo, name, Take Notes.
+private struct MiniCall: View {
+    var body: some View {
+        HStack(spacing: 4) {
+            if let logo = ServiceLogos.shared.image("meet.google.com") {
+                Image(nsImage: logo).resizable().frame(width: 8, height: 8)
+            } else {
+                Image(systemName: "video.fill").font(.system(size: 6))
+            }
+            Text("Google Meet").font(.system(size: 6.5))
+            Text("Take Notes").font(.system(size: 5.5, weight: .medium))
+                .padding(.horizontal, 4).frame(height: 10)
+                .background(.white.opacity(0.18), in: .capsule)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 6)
+        .frame(height: 17)
+    }
+}

@@ -9,7 +9,7 @@ Meeting notes, without a bot joining the call. Built so far:
 - **Noticing calls.** When one of those apps starts using the mic, a pill asks "Zoom call · Take notes?". It stays until you answer it or the call ends, with a soft sound when it appears (a 12-second offer was too easy to miss). It doesn't ask again for the same call.
 - **Meetings page** in the sidebar (⌘4). Every meeting, by day, with the app's icon, time and length. On the right: the recap (summary, decisions, action items you can tick, open questions) and the transcript with times and You / Them. Search, Copy Notes, Open in Editor, Show in Finder, Move to Trash. While a call is being written down it updates by itself. The toolbar has Take Notes / Stop. The other pages moved one number along (Dictionary is now ⌘5).
 - Very short calls (under about 40 words) get "Too short for a recap" instead of a made-up summary.
-- **Settings → General → Where it shows: Pill or Notch.**
+- **Settings → General → Where it shows: Pill or Notch**, picked by clicking one of two small previews. Each shows a mini screen playing a dictation, then a call offer, where they'd really appear.
   - *Pill* (default): dictation at the bottom as before; call messages use the same glass pill but at the top, under the menu bar, so they don't cover the call's buttons.
   - *Notch*: everything, dictation included, drops down from the notch as a small black island.
 - **The call's own logo**: a call in the browser shows the Meet / Teams / Webex / Zoom logo instead of Safari's or Chrome's, in the offer and on the Meetings page. The logos are fetched once and kept on the Mac.

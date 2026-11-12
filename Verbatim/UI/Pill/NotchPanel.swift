@@ -166,7 +166,7 @@ private struct TopView: View {
 }
 
 /// The notch's own outline: flares out at the top into the menu bar, rounded at the bottom.
-nonisolated private struct NotchShape: Shape {
+nonisolated struct NotchShape: Shape {
     var bottomRadius: CGFloat
     var topRadius: CGFloat = 7
 
