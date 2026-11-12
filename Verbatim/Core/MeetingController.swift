@@ -84,7 +84,7 @@ final class MeetingController {
         self.you = you
         let startDate = Date()
         state = .recording(call, started: startDate)
-        let notes = MeetingNotes(title: call.title, started: startDate)
+        let notes = MeetingNotes(title: call.title, bundleID: call.app.bundleID, started: startDate)
         self.notes = notes
         lastFile = notes.file
         cutThem = 0; cutYou = 0; pending = []

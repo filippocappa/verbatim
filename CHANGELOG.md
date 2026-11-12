@@ -7,6 +7,8 @@ Newest first. Each entry says what changed and where to find it.
 Meeting notes, without a bot joining the call. Built so far:
 - **Hearing the call.** Verbatim can listen to just the meeting app (Zoom, Meet in a browser, Webex, Teams, FaceTime, Slack, Discord) plus your mic, as two separate sides.
 - **Noticing calls.** When one of those apps starts using the mic, a pill asks "Zoom call · Take notes?". It stays until you answer it or the call ends, with a soft sound when it appears (a 12-second offer was too easy to miss). It doesn't ask again for the same call.
+- **Meetings page** in the sidebar (⌘4). Every meeting, by day, with the app's icon, time and length. On the right: the recap (summary, decisions, action items you can tick, open questions) and the transcript with times and You / Them. Search, Copy Notes, Open in Editor, Show in Finder, Move to Trash. While a call is being written down it updates by itself. The toolbar has Take Notes / Stop. The other pages moved one number along (Dictionary is now ⌘5).
+- Very short calls (under about 40 words) get "Too short for a recap" instead of a made-up summary.
 - **Meeting messages come down from the notch**, as a black shape growing out of it, instead of the pill at the bottom, which covered the call's own buttons. On a screen without a notch they hang from the top edge. The dictation pill stays at the bottom, so the two never collide.
 - A Meet call in Safari is no longer mistaken for FaceTime. FaceTime only counts when the FaceTime app is open.
 - **While taking notes:** the menu bar shows a record icon and the time. The menu has the "Taking notes" row with Stop, or "Take Notes" for a call it didn't notice.

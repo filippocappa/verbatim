@@ -9,17 +9,23 @@ final class MeetingNotes {
     struct Line { let at: Double; let them: Bool; let text: String }
 
     let file: URL
+
+    static var folder: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/Verbatim Meetings", isDirectory: true)
+    }
     private let title: String
     private let started: Date
     private(set) var lines: [Line] = []
     private var language: String?
     private let log = Logger(subsystem: AppInfo.bundleID, category: "meetings")
 
-    init(title: String, started: Date) {
+    private let bundleID: String
+
+    init(title: String, bundleID: String, started: Date) {
         self.title = title
+        self.bundleID = bundleID
         self.started = started
-        let folder = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/Verbatim Meetings", isDirectory: true)
+        let folder = Self.folder
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let stamp = started.formatted(.verbatim("\(year: .defaultDigits)-\(month: .twoDigits)-\(day: .twoDigits) \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)).\(minute: .twoDigits)",
                                                 timeZone: .current, calendar: .current))
@@ -65,6 +71,11 @@ final class MeetingNotes {
     func finish() async -> Bool {
         let transcript = plainTranscript()
         guard !transcript.isEmpty else { write(recap: "_Nothing was said, or the call couldn't be heard._"); return false }
+        // A few words aren't a meeting; a recap of them reads like nonsense.
+        if transcript.split(whereSeparator: \.isWhitespace).count < 40 {
+            write(recap: "_Too short for a recap. The transcript is below._")
+            return true
+        }
         guard let key = Keychain.groqKey else { return false }
         let model = Prefs.cleanupModel
         var parts: [String] = []
@@ -146,7 +157,7 @@ final class MeetingNotes {
     private func write(recap: String?) {
         if let recap { recapText = recap }
         let when = started.formatted(date: .complete, time: .shortened)
-        var md = "# \(title)\n\n\(when)\n\n"
+        var md = "# \(title)\n\n<!-- verbatim app=\(bundleID) started=\(Int(started.timeIntervalSince1970)) -->\n\n\(when)\n\n"
         md += "## Recap\n\n" + (recapText ?? "_Written when the call ends._") + "\n\n"
         md += "## Transcript\n\n"
         md += cleanLines.map { "**\(stamp($0.at)) \($0.them ? "Them" : "You"):** \($0.text)" }.joined(separator: "\n\n")

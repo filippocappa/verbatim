@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 enum Page: String, CaseIterable, Identifiable {
-    case home, stats, history, dictionary, snippets, style, commands
+    case home, stats, history, meetings, dictionary, snippets, style, commands
     var id: String { rawValue }
 
     var title: String {
@@ -10,6 +10,7 @@ enum Page: String, CaseIterable, Identifiable {
         case .home: "Home"
         case .stats: "Stats"
         case .history: "History"
+        case .meetings: "Meetings"
         case .dictionary: "Dictionary"
         case .snippets: "Snippets"
         case .style: "Style"
@@ -22,6 +23,7 @@ enum Page: String, CaseIterable, Identifiable {
         case .home: "house"
         case .stats: "chart.bar.xaxis"
         case .history: "clock"
+        case .meetings: "person.2.wave.2"
         case .dictionary: "character.book.closed"
         case .snippets: "text.quote"
         case .style: "textformat"
@@ -34,10 +36,11 @@ enum Page: String, CaseIterable, Identifiable {
         case .home: "1"
         case .stats: "2"
         case .history: "3"
-        case .dictionary: "4"
-        case .snippets: "5"
-        case .style: "6"
-        case .commands: "7"
+        case .meetings: "4"
+        case .dictionary: "5"
+        case .snippets: "6"
+        case .style: "7"
+        case .commands: "8"
         }
     }
 }
@@ -64,6 +67,7 @@ struct MainView: View {
             case .home: HomeView()
             case .stats: StatsView()
             case .history: HistoryView()
+            case .meetings: MeetingsView()
             case .dictionary: DictionaryView()
             case .snippets: SnippetsView()
             case .style: StyleView()
