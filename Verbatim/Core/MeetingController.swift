@@ -44,15 +44,16 @@ final class MeetingController {
 
     private func callChanged(_ call: MeetingWatcher.Call?) {
         if let call {
-            log.info("call started: \(call.title, privacy: .public)")
+            log.notice("call started: \(call.title, privacy: .public)")
             guard !isRecording, Prefs.meetingOffer, offered != call else { return }
             offered = call
+            log.notice("offering notes, pill was: \(String(describing: DictationController.shared.phase), privacy: .public)")
             DictationController.shared.showMeeting(.offer(app: call.app.name, title: call.title, bundleID: call.app.bundleID))
             #if DEBUG
             if UserDefaults.standard.bool(forKey: "autoTakeNotes") { start(call) }
             #endif
         } else {
-            log.info("call ended")
+            log.notice("call ended")
             offered = nil
             DictationController.shared.dismissMeetingOffer()
             if isRecording { stop() }
@@ -61,6 +62,7 @@ final class MeetingController {
 
     /// From the pill's "Take notes", the menu bar, or the Meetings page. With no call noticed it listens to the whole Mac.
     func start(_ call: MeetingWatcher.Call? = nil) {
+        log.notice("take notes pressed")
         guard !isRecording else { return }
         let call = call ?? watcher.current ?? watcher.detect()
             ?? MeetingWatcher.Call(app: MeetingWatcher.App(name: "Mac", bundleID: "", prefixes: [], isBrowser: false), title: "Meeting")
@@ -92,7 +94,7 @@ final class MeetingController {
                 self.cut(final: false)
             }
         }
-        log.info("taking notes: \(them.tapped.joined(separator: ", "), privacy: .public)")
+        log.notice("taking notes: \(them.tapped.joined(separator: ", "), privacy: .public)")
         DictationController.shared.showMeeting(.started(title: call.title))
         watchHearing(them)
         elapsed = 0
@@ -116,7 +118,7 @@ final class MeetingController {
         them = nil
         you = nil
         state = .idle
-        log.info("stopped taking notes")
+        log.notice("stopped taking notes")
         guard let notes else { DictationController.shared.showMeeting(.stopped); return }
         self.notes = nil
         let waiting = pending
@@ -125,7 +127,7 @@ final class MeetingController {
         Task {
             for t in waiting { await t.value }
             let ok = await notes.finish()
-            self.log.info("notes written: \(ok)")
+            self.log.notice("notes written: \(ok)")
             DictationController.shared.showMeeting(.saved(notes.file))
         }
     }
