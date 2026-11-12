@@ -252,7 +252,12 @@ final class DictationController {
         Sound.play(.start)
 
         dropParts()
-        if let key = Keychain.groqKey, connectivity.isOnline {
+        let local = LocalModels.shared.active
+        if let local, Prefs.localOnly || Keychain.groqKey == nil || !connectivity.isOnline {
+            // Load the model while you talk, so it's ready when you stop.
+            Task { try? await LocalSpeech.shared.warm(local) }
+        }
+        if let key = Keychain.groqKey, connectivity.isOnline, !(Prefs.localOnly && local != nil) {
             Groq.prewarm(key: key)
             if !isCommand {
                 partWatcher = Task { [weak self] in
@@ -433,8 +438,9 @@ final class DictationController {
     private func transcribe(_ samples: [Float], _ entries: [VocabEntry],
                             sent: [(end: Int, task: Task<Groq.Transcript?, Never>?)] = []) async -> (Groq.Transcript, String)? {
         let key = Keychain.groqKey
-        let useCloud = key != nil && connectivity.isOnline
-        var engine = useCloud ? "groq" : "apple"
+        let local = LocalModels.shared.active
+        let useCloud = key != nil && connectivity.isOnline && !(Prefs.localOnly && local != nil)
+        var engine = "groq"
         var transcript: Groq.Transcript
 
         #if DEBUG
@@ -459,13 +465,12 @@ final class DictationController {
                 } catch {
                     if let g = error as? GroqError, g.isAuth { keyRejected = true }
                     if Task.isCancelled { return nil }
-                    log.error("Groq failed, using Apple: \(error.localizedDescription, privacy: .public)")
-                    engine = "apple"
+                    log.error("Groq failed, using this Mac: \(error.localizedDescription, privacy: .public)")
                     writingNote = "Groq is slow, using this Mac"
-                    transcript = try await transcribeOnDevice(samples, entries)
+                    (transcript, engine) = try await transcribeOnDevice(samples, entries)
                 }
             } else {
-                transcript = try await transcribeOnDevice(samples, entries)
+                (transcript, engine) = try await transcribeOnDevice(samples, entries)
             }
         } catch {
             signposter.endInterval("transcribe", stt)
@@ -586,11 +591,25 @@ final class DictationController {
         return l == "auto" ? Prefs.offlineLanguage : l
     }
 
-    private func transcribeOnDevice(_ samples: [Float], _ entries: [VocabEntry]) async throws -> Groq.Transcript {
+    /// The downloaded model if there is one, else Apple's engine. Returns the engine used, for History.
+    private func transcribeOnDevice(_ samples: [Float], _ entries: [VocabEntry]) async throws -> (Groq.Transcript, String) {
+        if let model = LocalModels.shared.active {
+            do {
+                let language = Prefs.language == "auto" ? nil : Prefs.language
+                let prompt = model == .whisper
+                    ? Groq.whisperPrompt(words: Vocabulary.promptWords(entries), language: Prefs.language) : nil
+                let t = try await LocalSpeech.shared.transcribe(AudioRecorder.boost(samples), model: model,
+                                                                language: language, prompt: prompt)
+                return (t, model.engine)
+            } catch {
+                if Task.isCancelled { throw error }
+                log.error("\(model.rawValue, privacy: .public) failed, using Apple: \(error.localizedDescription, privacy: .public)")
+            }
+        }
         let lang = offlineLanguage
         let text = try await AppleTranscriber.transcribe(samples: samples, languageCode: lang,
                                                          vocabulary: entries.map(\.word))
-        return Groq.Transcript(text: text, language: lang)
+        return (Groq.Transcript(text: text, language: lang), "apple")
     }
 
     // MARK: Learning

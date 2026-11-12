@@ -23,6 +23,8 @@ enum Prefs {
         static let paused = "paused"
         static let meetingOffer = "meetingOffer"        // offer to take notes when a call starts
         static let pillPlace = "pillPlace"              // "pill" (bottom, calls at the top) or "notch"
+        static let speechEngine = "speechEngine"        // "groq" (local model as backup) or "local" (never sends audio)
+        static let localModel = "localModel"            // LocalModel raw value
     }
 
     static let defaultCleanupModel = "qwen/qwen3.8-27b"
@@ -44,6 +46,8 @@ enum Prefs {
             Key.didOnboard: false,
             Key.paused: false,
             Key.meetingOffer: true,
+            Key.speechEngine: "groq",
+            Key.localModel: LocalModel.parakeet.rawValue,
             Key.pillPlace: "pill",
         ])
     }
@@ -63,6 +67,9 @@ enum Prefs {
     static var sounds: Bool { d.bool(forKey: Key.sounds) }
     static var meetingOffer: Bool { d.bool(forKey: Key.meetingOffer) }
     static var useNotch: Bool { d.string(forKey: Key.pillPlace) == "notch" }
+    /// Audio stays on this Mac: a local model does the speech even when Groq is there.
+    static var localOnly: Bool { d.string(forKey: Key.speechEngine) == "local" }
+    static var localModel: LocalModel { LocalModel(rawValue: d.string(forKey: Key.localModel) ?? "") ?? .parakeet }
     static var microphone: String { d.string(forKey: Key.microphone) ?? "auto" }
     static var typingWPM: Int { max(10, d.integer(forKey: Key.typingWPM)) }
     static var paused: Bool {

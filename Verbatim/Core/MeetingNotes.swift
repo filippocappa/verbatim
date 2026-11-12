@@ -44,7 +44,8 @@ final class MeetingNotes {
         guard speech >= 0.8 else { return }
         let audio = AudioRecorder.boost(samples)
         var text: String?
-        if let key = Keychain.groqKey {
+        let local = LocalModels.shared.active
+        if let key = Keychain.groqKey, !(Prefs.localOnly && local != nil) {
             let up = Groq.upload(audio)
             // On a piece that's nearly silent, Whisper reads the prompt back, so only send it when there's real talk.
             let words = speech >= 3 ? Vocabulary.promptWords(Vocabulary.all()) : []
@@ -55,6 +56,13 @@ final class MeetingNotes {
                 if let l = t.language { language = l }
             } catch {
                 log.error("meeting piece failed on Groq: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        if text == nil, let local {
+            do {
+                text = try await LocalSpeech.shared.transcribe(audio, model: local, language: nil, prompt: nil).text
+            } catch {
+                log.error("meeting piece failed on \(local.rawValue, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
         }
         if text == nil {

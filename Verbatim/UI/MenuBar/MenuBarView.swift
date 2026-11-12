@@ -164,6 +164,9 @@ struct EngineStatus: View {
         if controller.phase == .listening { return "Listening" }
         if controller.isPaused { return "Paused" }
         if !controller.accessibilityTrusted { return "Needs Accessibility" }
+        if let local = LocalModels.shared.active, Prefs.localOnly || !controller.connectivity.isOnline || !hasKey {
+            return "Ready, \(local == .parakeet ? "Parakeet" : "Whisper") on this Mac"
+        }
         if !controller.connectivity.isOnline || !hasKey { return "Ready, on this Mac" }
         if controller.keyRejected { return "Ready, Groq key rejected" }
         return "Ready, Groq cloud"

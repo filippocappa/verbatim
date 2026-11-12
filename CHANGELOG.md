@@ -3,6 +3,18 @@
 Newest first. Each entry says what changed and where to find it.
 
 
+
+## 12 November 2026, speech models on this Mac
+
+- **Settings → Speech → Engines: download a speech model to run on this Mac.**
+  - *Parakeet* (630 MB, recommended): about a tenth of a second per sentence, English, Italian and 23 more.
+  - *Whisper large v3 turbo* (630 MB): the model Groq runs, 1–3 s per sentence here, uses your Dictionary words as hints.
+  - Each has Download (with progress), Use, and a bin to delete it and free the space. The first time after downloading it gets ready for the Mac's chip: under a minute for Parakeet, about 10 minutes for Whisper.
+- **Speech goes to: Groq first, or Only this Mac.** With *Groq first*, a downloaded model replaces Apple's engine as the backup when you're offline or Groq is slow. With *Only this Mac*, your voice never leaves the Mac. Cleanup still uses Groq, text only.
+- Meeting notes follow the same choice.
+- History shows which engine wrote each dictation (Groq, Parakeet, Whisper or Apple), and the status under the app name says which local model is ready.
+- The model loads while you talk and is unloaded after 10 idle minutes, so it doesn't take memory when you're not dictating.
+
 ## 12 November 2026, right-hand keys only
 
 - **Only the right ⌘ and the right ⌥ start dictation and commands** (and stop them). The left keys are now free for normal shortcuts. Every hint in the app says "right ⌘" / "right ⌥".

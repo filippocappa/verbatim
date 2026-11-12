@@ -16,7 +16,7 @@ final class Dictation {
     var latencyMs: Int
     var appName: String?
     var appBundleID: String?
-    /// "groq" or "apple".
+    /// "groq", "apple", "parakeet" or "whisper".
     var engine: String
     /// "en", "it", ...
     var language: String?

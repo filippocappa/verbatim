@@ -208,6 +208,8 @@ private struct SpeechSettings: View {
     @AppStorage(Prefs.Key.offlineLanguage) private var offlineLanguage = "en"
     @AppStorage(Prefs.Key.microphone) private var microphone = Microphone.automatic
     @AppStorage(Prefs.Key.cleanupModel) private var model = Prefs.defaultCleanupModel
+    @AppStorage(Prefs.Key.speechEngine) private var engine = "groq"
+    @State private var models = LocalModels.shared
     @State private var inputs = Microphone.inputs()
     @State private var advanced = false
 
@@ -242,6 +244,7 @@ private struct SpeechSettings: View {
                     .labelsHidden()
                     .fixedSize()
                 }
+                if models.active == nil {
                 SettingsRow(symbol: "wifi.slash", title: "Offline, listen for",
                             detail: "Apple's on-device engine takes one language at a time.") {
                     Picker("", selection: $offlineLanguage) {
@@ -252,14 +255,27 @@ private struct SpeechSettings: View {
                     .fixedSize()
                     .disabled(language != "auto")
                 }
+                }
             }
 
-            SettingsGroup(title: "Engines", footer: "It picks by itself: Groq when you're online and have a key, the Mac's own engine otherwise.") {
-                SettingsRow(symbol: "cloud", title: "Online", detail: "Groq, Whisper large v3 turbo. Fast, English and Italian in one go.") {
-                    Text(Keychain.groqKey == nil ? "No key" : "In use").foregroundStyle(.secondary)
+            SettingsGroup(title: "Engines", footer: enginesFooter) {
+                SettingsRow(symbol: "arrow.triangle.branch", title: "Speech goes to",
+                            detail: engine == "local" ? "A model on this Mac. Your voice never leaves it." : "Groq when you're online, a model on this Mac otherwise.") {
+                    Picker("", selection: $engine) {
+                        Text("Groq first").tag("groq")
+                        Text("Only this Mac").tag("local")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
                 }
-                SettingsRow(symbol: "desktopcomputer", title: "Offline", detail: "Apple's speech engine, on this Mac. Nothing leaves the Mac, one language at a time.") {
-                    Text(Keychain.groqKey == nil ? "In use" : "Backup").foregroundStyle(.secondary)
+                SettingsRow(symbol: "cloud", title: "Groq", detail: "Whisper large v3 turbo in the cloud. The fastest, English and Italian in one go.") {
+                    Text(Keychain.groqKey == nil ? "No key" : engine == "local" ? "Off" : "In use").foregroundStyle(.secondary)
+                }
+                ForEach(LocalModel.allCases) { LocalModelRow(model: $0) }
+                SettingsRow(symbol: "apple.logo", title: "Apple", detail: "Built into macOS, nothing to download. One language at a time.") {
+                    Text(models.active == nil ? (Keychain.groqKey == nil || engine == "local" ? "In use" : "Backup") : "Last resort")
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -282,6 +298,72 @@ private struct SpeechSettings: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 200)
                 }
+            }
+        }
+    }
+}
+
+extension SpeechSettings {
+    fileprivate var enginesFooter: String {
+        if engine == "local", models.active == nil { return "Download a model above to keep everything on this Mac. Until then, Groq is used." }
+        return "Models on this Mac work offline and cost nothing. Cleanup still uses Groq when it's there; it only gets text, never audio."
+    }
+}
+
+/// One downloadable model: Download, progress, then Use and Delete.
+private struct LocalModelRow: View {
+    let model: LocalModel
+    @State private var models = LocalModels.shared
+    @AppStorage(Prefs.Key.localModel) private var chosen = LocalModel.parakeet.rawValue
+    @AppStorage(Prefs.Key.speechEngine) private var engine = "groq"
+    @State private var confirmDelete = false
+
+    var body: some View {
+        SettingsRow(symbol: model == .parakeet ? "bird" : "waveform", title: "\(model.name)  ·  \(model.size)", detail: model.detail) {
+            trailing
+        }
+    }
+
+    @ViewBuilder private var trailing: some View {
+        switch models.state(model) {
+        case .none:
+            Button("Download") { models.download(model) }
+        case let .downloading(p):
+            HStack(spacing: 8) {
+                ProgressView(value: p).frame(width: 90)
+                Text(p.formatted(.percent.precision(.fractionLength(0)))).monospacedDigit().foregroundStyle(.secondary)
+                    .frame(width: 36, alignment: .trailing)
+                Button { models.cancel(model) } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless)
+                    .help("Stop the download")
+            }
+        case .preparing:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(model == .whisper ? "Preparing, ~10 min" : "Preparing…").foregroundStyle(.secondary)
+            }
+            .help(model == .whisper ? "Getting it ready for this Mac's chip. Only the first time, about 10 minutes."
+                                    : "Getting it ready for this Mac's chip. Only the first time, under a minute.")
+        case .ready:
+            HStack(spacing: 10) {
+                if models.active == model {
+                    Text(engine == "local" || Keychain.groqKey == nil ? "In use" : "Backup").foregroundStyle(.secondary)
+                } else {
+                    Button("Use") { chosen = model.rawValue }
+                }
+                Button { confirmDelete = true } label: { Image(systemName: "trash") }
+                    .buttonStyle(.borderless)
+                    .help("Delete it to free \(model.size)")
+                    .confirmationDialog("Delete \(model.name)?", isPresented: $confirmDelete) {
+                        Button("Delete", role: .destructive) { Task { await models.delete(model) } }
+                    } message: {
+                        Text("Frees \(model.size). You can download it again any time.")
+                    }
+            }
+        case let .failed(message):
+            HStack(spacing: 8) {
+                Text("Didn't download").foregroundStyle(.orange).help(message)
+                Button("Try Again") { models.download(model) }
             }
         }
     }

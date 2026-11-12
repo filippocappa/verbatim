@@ -146,7 +146,7 @@ private struct HistoryInspector: View {
                         row("Words", "\(item.words)")
                         row("Speaking", Format.duration(item.audioSeconds))
                         row("Ready in", Format.seconds(item.latencyMs))
-                        row("Engine", item.engine == "groq" ? "Groq cloud" : "On this Mac")
+                        row("Engine", HistoryView.engineName(item.engine))
                     }
                     .font(.callout)
                     HStack {
@@ -167,6 +167,17 @@ private struct HistoryInspector: View {
         GridRow {
             Text(k).foregroundStyle(.secondary)
             Text(v)
+        }
+    }
+}
+
+extension HistoryView {
+    static func engineName(_ engine: String) -> String {
+        switch engine {
+        case "groq": "Groq cloud"
+        case "parakeet": "Parakeet, on this Mac"
+        case "whisper": "Whisper, on this Mac"
+        default: "Apple, on this Mac"
         }
     }
 }

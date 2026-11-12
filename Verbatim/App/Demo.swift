@@ -202,6 +202,45 @@ enum Demo {
             Task { await speedTest(path); exit(0) }
             return
         }
+        if let name = d.string(forKey: "localDownload"), let m = LocalModel(rawValue: name) {
+            Task {
+                let t0 = ContinuousClock.now
+                LocalModels.shared.download(m)
+                var last = ""
+                while true {
+                    let state = "\(LocalModels.shared.state(m))"
+                    if state != last { print("\(t0.duration(to: .now)) \(state)"); last = state }
+                    if case .ready = LocalModels.shared.state(m) { break }
+                    if case .failed = LocalModels.shared.state(m) { break }
+                    try? await Task.sleep(for: .seconds(1))
+                }
+                exit(0)
+            }
+            return
+        }
+        if let paths = d.string(forKey: "localTranscribe") {
+            Task {
+                for name in LocalModel.allCases where name.isOnDisk {
+                    let t0 = ContinuousClock.now
+                    try? await LocalSpeech.shared.warm(name)
+                    print("\(name.rawValue) loaded in \(t0.duration(to: .now))")
+                    for path in paths.split(separator: ",").map(String.init) {
+                        do {
+                            let samples = try load(path)
+                            let t1 = ContinuousClock.now
+                            let lang = d.string(forKey: "transcribeLanguage")
+                            let t = try await LocalSpeech.shared.transcribe(samples, model: name, language: lang, prompt: nil)
+                            print("\(name.rawValue) \((path as NSString).lastPathComponent) (\(t1.duration(to: .now)), \(t.language ?? "?")): \(t.text)")
+                        } catch {
+                            print("\(name.rawValue) failed: \(error)")
+                        }
+                    }
+                    await LocalSpeech.shared.unload(name)
+                }
+                exit(0)
+            }
+            return
+        }
         if let path = d.string(forKey: "transcribeFile") {
             Task { await transcribe(path); exit(0) }
             return
