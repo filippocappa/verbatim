@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- One closing quote: a round head with a tail sweeping down to the left. -->
+    <g id="mark">
+      <circle cx="0" cy="0" r="112"/>
+      <path d="M112,0 C112,128 48,222 -78,256 C-4,206 28,152 38,104 Z"/>
+    </g>
+  </defs>
+  <g fill="#FFFFFF">
+    <use href="#mark" x="362" y="440"/>
+    <use href="#mark" x="662" y="440"/>
+  </g>
+</svg>

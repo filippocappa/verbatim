@@ -1,0 +1,63 @@
+# What's changed
+
+Newest first. Each entry says what changed and where to find it.
+
+## 12 November 2026, later
+
+- **Commands:** the plain Write / Open and search switch is now a wide sliding switch, with a one-line description under each side.
+- **Stats → Fun facts:** starts on a random fact each time, not always the book.
+- **Settings (⌘,):** now a 16:9 window with a sidebar, like the main window. That also removes the big highlight box that showed over the tabs.
+- **Settings → Speech → Engines:** shows what runs online (Groq, Whisper large v3 turbo) and offline (Apple's speech engine), and which one is in use.
+- **Settings → Speech → Today on Groq's free plan:** the numbers now account for the steady refill (one cleanup back every ~1.5 min, one transcription every ~45 s) instead of assuming a reset.
+
+## 12 November 2026
+
+### Speed
+- **It isn't live streaming.** It still waits for you to stop, but two things make it much faster:
+  - **Smaller upload.** Audio is compressed before it goes to Groq (about 7 times smaller). On a 43-second clip, transcribing went from about 2 s to 0.7 s.
+  - **Early parts.** After 15 seconds of talking, the audio so far is sent at your next natural pause, while you keep talking. When you stop, only the last part is left. In the same test, the last part took 0.44 s against 0.81 s for the whole clip, with the same text.
+- History now shows the app you pasted into, not the one you were in when you started talking.
+
+### Commands (sidebar → Commands)
+- Two tabs: **Write** and **Open and search**.
+- **Your commands.** Save a short name with your own instruction, for example "bullets" → "Turn it into a bullet list".
+  - With text selected, it runs your instruction on the selection.
+  - With nothing selected, it writes from what you say after the name and pastes it at your cursor ("standup finished login, working on stats").
+  - Anything you say after the name is added just that once ("bullets, keep it to three").
+  - Starters: bullets, tldr, reply, translate, standup.
+- **Your sites.** Add a site it doesn't know (name and address). "open Linear" and "search Linear for …" then work. To search inside the site, search it for the word TEST and paste that address.
+
+### Style (sidebar → Style)
+- Cleanup is merged into Style; there's no separate Cleanup setting any more.
+  - Formal = cleaned and smoothed.
+  - Normal and the casual tones = cleaned.
+  - Exact = the words as heard.
+- A slider per app with an icon for each tone.
+- **Examples written for each app.** The model guesses what you'd typically dictate in that app and writes it in every tone. A new app gets one a few seconds after you add it.
+- **Edit Tones** (top right) shows what each tone tells the AI, and lets you change it. Reset puts back the original. The base cleanup instructions are at the bottom.
+- **Custom** tone that follows instructions you write.
+- Casual is now clearly different from Normal: it trims words, joins sentences with commas, and drops the final full stop.
+- Formal no longer translates Italian into English.
+
+### Stats (sidebar → Stats)
+- The number tiles have small charts inside.
+- **Fun facts** show one at a time. A bar fills over 7 seconds, then it moves on. It pauses while the pointer is over it. Click a bar to jump; click the book fact for another book.
+
+### Snippets (sidebar → Snippets)
+- Same tile look as the other pages.
+- When empty, it shows starters (my email, my phone, my address, meeting link, sign off). Click one to fill the boxes.
+
+### Settings (⌘,)
+- Tabs with icons: General, Speech, Permissions. Each group sits in its own tile, with an icon on every row.
+- All tabs are the same size, so switching no longer resizes the window (that was the flash).
+- "Learn from my fixes" moved to General. The cleanup model is under Speech → Advanced.
+- **Speech → Today on Groq's free plan.** Shows how many transcriptions and cleanups are left today and when they refill. The numbers update with every dictation; Check Now asks Groq again.
+
+### Look
+- Page titles use a serif font (New York). Easy to switch back.
+
+## Groq's free plan, in short
+- Per day: 2,000 transcriptions and 1,000 cleanups. A dictation uses up to 2 transcriptions and 1 cleanup.
+- It doesn't reset at midnight. Each one you use comes back on its own, spread over 24 hours: a cleanup every ~86 s, a transcription every ~43 s.
+- Per minute: about 8 dictations.
+- When a limit is hit, speech falls back to Apple's engine on the Mac and text pastes without cleanup.
