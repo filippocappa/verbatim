@@ -2,7 +2,67 @@
 
 Newest first. Each entry says what changed and where to find it.
 
+## 13 November 2026, the screen assistant, recordings, asking your meetings, and voices
 
+- **Screenshots in the README.** Home, Meetings, Style and Stats, made from sample data. `make shots` makes them again without putting anything on screen.
+- **Ask about what's on screen.** Double-tap right ⌥ with nothing selected and say what you want.
+  - Ask for something to write ("reply saying Thursday at 10 works") and it's written at your cursor. It reads the screen, so the reply fits the conversation: same language, same names, about the same length.
+  - Ask a question ("what does this error mean", "what does Marco want from me") and the answer shows in a small panel at the bottom of the screen. Esc or a click anywhere else closes it, and **Copy** copies it.
+  - "Open" and "search" work as before. Questions that need the web right now, like the weather, still go to Google.
+  - It reads the text of the front window. If Verbatim already has Screen Recording permission, it also sends a picture of that window. It never asks for that permission itself.
+  - It uses Claude when you have a Claude key, Groq otherwise. With *Only this Mac* it uses Groq, like the other commands. In tests a reply took about 3.5 seconds and an answer about 3.
+- **Translate as you dictate.** Double-tap the **right ⇧**, speak Italian and it pastes English, or speak English and it pastes Italian. Lists and line breaks are kept. Needs a Groq key. Listed in **Settings → General → Shortcuts**.
+- **Transcribe a recording.** Drop an audio or video file on **Meetings**, or use the new **Transcribe a Recording** button. It becomes a meeting like any other: transcript, speakers told apart, recap. With Parakeet a one-minute video took 9 seconds.
+- **Ask your meetings.** The **Ask** button on Meetings (the magnifying glass). Ask "what did we decide about pricing?" or "cosa ha detto Giulia sull'onboarding?" and Claude answers from your notes and transcripts, with links to the meetings it came from. If you have a lot of meetings, it first reads the recaps to pick which transcripts to read. Needs a Claude key, and it's off with *Only this Mac*.
+- **Voices are remembered across meetings.** When you rename *Person 2* to *Sara*, or Meet's captions or the call name her, her voice is kept, and the next meeting says *Sara* by itself. Claude's guesses aren't learned, so a wrong guess can't spread.
+  - In a test with the same voices in two different calls, the same voice scored 0.94 and different voices 0.17, so names only go on clear matches.
+  - **Settings → Meetings → Voices** shows who it knows and lets you forget one voice or all of them. Voice prints are numbers, not audio. They stay on this Mac and aren't in backups.
+- **Edit the transcript.** Hover a line and click the pencil, or right-click it, to fix what was heard. Right-click → **Said By** moves a line to another speaker, and **Delete Line** removes it.
+- **Merge speakers.** When a call splits one person into two, click one of them and pick **Or the same person as**.
+- **Words as you talk.** **Settings → Speech → Show words as you talk** (off by default). Your words appear in a dark card sitting right on top of the pill while you speak (under the notch in notch mode).
+  - New words are grey. Once two reads in a row agree on a word it turns white, so the end of the sentence can still change while the start stays put.
+  - "New line" breaks the line and "bullet point" starts a list as you say them. A "send" at the end shows as ↵.
+  - Nothing goes into the app while you talk. When you stop, the cleaned-up text is pasted as usual and the card goes away.
+  - For commands and translations the words show in the pill itself.
+  - It needs Parakeet, which is loaded the moment you start talking, so the first words don't wait for it. It re-reads about five times a second, and each read takes about a tenth of a second. Long dictations stay that fast because it only re-reads what you've said since the last pause.
+- **No more 40-second waits when the internet is bad.** The time limit on Groq and Claude only counted silence, so on a broken Wi-Fi a dictation could wait half a minute before giving up. Now it's a hard limit: with Parakeet downloaded, Groq gets about 2.5 seconds, then your Mac takes over, and the Mac's cleanup gets ready while it waits. That dictation would now take about 3 seconds.
+- **"Send" after a comma always counts.** "Let me know what works for you, send" now presses Return. Before, the "you" right before it made it look like part of the sentence.
+
+## 12 November 2026, formatting by voice, "send", export and backup
+
+- **Format as you talk.** Say "new line", "new paragraph", "bullet", "comma", "full stop" or "question mark" and you get the real thing. Italian works too: "a capo", "nuovo paragrafo", "punto elenco", "virgola", "punto interrogativo". When you're talking *about* them ("add a new line to the file", "a missing comma"), they stay as words.
+- **Say "send" at the end** (or "invia") and it presses Return after pasting, so a Slack or WhatsApp message goes without touching the keyboard. Not when it's part of the sentence ("I'll send", "te lo invia"). Turn it off in **Settings → General → Say “send” to send**.
+- **Meetings can start by themselves.** **Settings → Meetings → Take notes by itself** (off by default) starts the notes as soon as a call is noticed, without the Take Notes button. The offer to take notes has its own switch there too.
+- **Export a meeting** as Markdown, plain text or PDF, from the **Export** button on a meeting.
+- **Backup and restore** in **Settings → General → Backup**. One zip with your meetings, history, Dictionary, snippets, styles and commands. API keys aren't in it. Restoring adds what's missing and deletes nothing, and puts your settings back as they were in the backup.
+
+## 12 November 2026, better meeting transcripts and names
+
+- **Meetings now use Parakeet on this Mac** when it's downloaded, instead of Groq. We tested both on three recorded meetings (English, Italian, a business call). Parakeet got more words right (12–16% wrong against 14–28% for Groq) and was about 5 times faster. The audio doesn't leave the Mac. If Parakeet fails on a piece, Groq does it.
+- **Names are spelled right more often.**
+  - Parakeet now listens for the names in your Dictionary and checks them against the audio. The first time, a small model is downloaded for this (about 100 MB).
+  - **Settings → Meetings → Names from Calendar** (off by default). It reads who's invited to the call from Calendar and adds their names too. It asks for Calendar access when you turn it on.
+  - **In Google Meet, the names on the video tiles are read too**, every 10 seconds, so people who join late count. Nothing to turn on. Your own name is left out.
+  - **With only one other person on the call, the transcript uses their name** instead of *Them*.
+- **Google Meet: turn on captions (the CC button) and the transcript says who said what, by name**, instead of *Person 1*, *Person 2*. Verbatim doesn't use Meet's text, only whose captions are moving at each moment. Captions are only shown to you. In a test with three voices, every sentence got the right name.
+  - In the test call, it fixed all 4 people's names that Parakeet had got wrong before (for example "Randy Givens" → "Randy Giveans"), without changing other words.
+- **Claude fixes names after the call.** Paste an Anthropic key in **Settings → Meetings → Claude**. When the call ends, Claude reads the transcript and fixes misheard names of people, companies and products, before the recap is written. It sends the transcript to Anthropic, so it's off with *Only this Mac*. About $0.10 for an hour of call.
+- **Claude also works out who Person 1, Person 2… are**, from what people say ("thanks Marco", "Sara, can you…") and the names in the call. Only when it's clear; otherwise the label stays and you can still click it to rename. Same request as the name fixes, so no extra cost.
+- **Settings has a Meetings page** with what transcribes your calls, the Calendar switch and the Claude key.
+
+## 12 November 2026, Apple Intelligence and voices in meetings
+
+- **Cleanup on this Mac.** When Groq can't clean up the text (offline, out of free requests, slow, or with *Only this Mac*), Apple Intelligence on the Mac does it instead. Before, the text was pasted as heard.
+  - It's lighter than Groq: punctuation, capitals and filler words go, your words stay as they are. Tones, Dictionary hints and "no wait" corrections are Groq only. In tests, the small model got those wrong and sometimes changed the meaning.
+  - About a second per dictation. It loads while you talk.
+- **Only this Mac now means everything.** Speech, cleanup and meeting recaps all stay on the Mac. Commands (right ⌥) still use Groq.
+- **Settings → Speech → Engines** has an Apple Intelligence row: Backup, In use, or Off with the reason (for example, if Apple Intelligence is turned off in System Settings).
+- **Meetings: who said what.** When the call ends, the voices on the other side are told apart and the transcript says *Person 1*, *Person 2*… instead of *Them*. With only one other person it stays *Them*. The speaker models are downloaded the first time (about 30 MB).
+  - **Click a name in the transcript** to say who it is. It's changed everywhere in that meeting, recap included.
+  - During the call, the other side's audio is kept in a temporary file for this and deleted as soon as the notes are written.
+- **Meeting recaps on this Mac.** With *Only this Mac*, or when Groq fails, Apple Intelligence writes the recap. It's plainer than Groq's but stays on the Mac.
+- The transcript now goes sentence by sentence, so you and the others interleave properly instead of in 25-second blocks.
+- **Fixed: meeting transcripts with holes.** About one piece in ten sent to Groq came back as a few Dictionary words instead of what was said, so up to 25 seconds went missing. Now that piece is asked again without the Dictionary words.
 
 ## 12 November 2026, speech models on this Mac
 

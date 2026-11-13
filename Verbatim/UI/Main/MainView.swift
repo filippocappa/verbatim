@@ -47,10 +47,12 @@ enum Page: String, CaseIterable, Identifiable {
 
 struct MainView: View {
     @SceneStorage("page") private var page: Page = .home
+    /// Shows this page instead of the stored one (screenshots, which run outside a scene).
+    var shown: Page? = nil
 
     var body: some View {
         NavigationSplitView {
-            List(selection: Binding(get: { Optional(page) }, set: { if let p = $0 { page = p } })) {
+            List(selection: Binding(get: { Optional(shown ?? page) }, set: { if let p = $0 { page = p } })) {
                 ForEach(Page.allCases) { p in
                     Label(p.title, systemImage: p.symbol).tag(p)
                 }
@@ -63,7 +65,7 @@ struct MainView: View {
             #endif
             .safeAreaInset(edge: .bottom) { SidebarFooter() }
         } detail: {
-            switch page {
+            switch shown ?? page {
             case .home: HomeView()
             case .stats: StatsView()
             case .history: HistoryView()

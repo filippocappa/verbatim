@@ -25,6 +25,11 @@ enum Prefs {
         static let pillPlace = "pillPlace"              // "pill" (bottom, calls at the top) or "notch"
         static let speechEngine = "speechEngine"        // "groq" (local model as backup) or "local" (never sends audio)
         static let localModel = "localModel"            // LocalModel raw value
+        static let meetingCalendar = "meetingCalendar"  // read the attendees of the call from Calendar
+        static let spokenSend = "spokenSend"            // "send" at the end of a dictation presses Return
+        static let meetingAutoStart = "meetingAutoStart" // take notes as soon as a call starts, without asking
+        static let liveWords = "liveWords"               // show what's heard in the pill while you talk (Parakeet)
+        static let rememberVoices = "rememberVoices"     // name voices met in earlier meetings (VoiceBook)
     }
 
     static let defaultCleanupModel = "qwen/qwen3.8-27b"
@@ -49,6 +54,10 @@ enum Prefs {
             Key.speechEngine: "groq",
             Key.localModel: LocalModel.parakeet.rawValue,
             Key.pillPlace: "pill",
+            Key.meetingCalendar: false,
+            Key.spokenSend: true,
+            Key.meetingAutoStart: false,
+            Key.rememberVoices: true,
         ])
     }
 
@@ -66,6 +75,11 @@ enum Prefs {
     static var learnFromCorrections: Bool { d.bool(forKey: Key.learnFromCorrections) }
     static var sounds: Bool { d.bool(forKey: Key.sounds) }
     static var meetingOffer: Bool { d.bool(forKey: Key.meetingOffer) }
+    static var meetingCalendar: Bool { d.bool(forKey: Key.meetingCalendar) }
+    static var spokenSend: Bool { d.bool(forKey: Key.spokenSend) }
+    static var meetingAutoStart: Bool { d.bool(forKey: Key.meetingAutoStart) }
+    static var rememberVoices: Bool { d.bool(forKey: Key.rememberVoices) }
+    static var liveWords: Bool { d.bool(forKey: Key.liveWords) }
     static var useNotch: Bool { d.string(forKey: Key.pillPlace) == "notch" }
     /// Audio stays on this Mac: a local model does the speech even when Groq is there.
     static var localOnly: Bool { d.string(forKey: Key.speechEngine) == "local" }
@@ -78,36 +92,41 @@ enum Prefs {
     }
 }
 
-/// The Groq API key lives in the login keychain, never in UserDefaults.
+/// API keys live in the login keychain, never in UserDefaults.
 enum Keychain {
-    private static let account = "groq-api-key"
-
     static var groqKey: String? {
-        get {
-            let query: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: AppInfo.bundleID,
-                kSecAttrAccount as String: account,
-                kSecReturnData as String: true,
-                kSecMatchLimit as String: kSecMatchLimitOne,
-            ]
-            var out: AnyObject?
-            guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
-                  let data = out as? Data, let s = String(data: data, encoding: .utf8), !s.isEmpty
-            else { return nil }
-            return s
-        }
-        set {
-            let base: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: AppInfo.bundleID,
-                kSecAttrAccount as String: account,
-            ]
-            SecItemDelete(base as CFDictionary)
-            guard let v = newValue?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty else { return }
-            var add = base
-            add[kSecValueData as String] = Data(v.utf8)
-            SecItemAdd(add as CFDictionary, nil)
-        }
+        get { read("groq-api-key") }
+        set { write("groq-api-key", newValue) }
+    }
+
+    /// Claude, for fixing names in meeting notes.
+    static var claudeKey: String? {
+        get { read("anthropic-api-key") }
+        set { write("anthropic-api-key", newValue) }
+    }
+
+    private static func base(_ account: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: AppInfo.bundleID,
+         kSecAttrAccount as String: account]
+    }
+
+    private static func read(_ account: String) -> String? {
+        var query = base(account)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var out: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
+              let data = out as? Data, let s = String(data: data, encoding: .utf8), !s.isEmpty
+        else { return nil }
+        return s
+    }
+
+    private static func write(_ account: String, _ value: String?) {
+        SecItemDelete(base(account) as CFDictionary)
+        guard let v = value?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty else { return }
+        var add = base(account)
+        add[kSecValueData as String] = Data(v.utf8)
+        SecItemAdd(add as CFDictionary, nil)
     }
 }

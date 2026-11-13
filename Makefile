@@ -1,10 +1,11 @@
 # make           build (Debug)
 # make run       build and launch the Debug app
 # make install   Release build into /Applications, then relaunch
+# make shots     README screenshots
 APP_NAME := Verbatim
 DERIVED := build
 
-.PHONY: project build run install clean
+.PHONY: project build run install clean shots
 
 project:
 	xcodegen generate --quiet
@@ -27,3 +28,10 @@ install: project
 
 clean:
 	rm -rf $(DERIVED)
+
+# make shots     README screenshots from sample data, into .github/screens.
+# Draws a window behind the desktop picture, so nothing shows on screen. Needs Screen Recording for the Debug app.
+shots: build
+	$(DERIVED)/Build/Products/Debug/$(APP_NAME).app/Contents/MacOS/$(APP_NAME) -AppleLanguages '(en)' -AppleLocale en_GB \
+		-demoData YES -meetingsFolder "$(CURDIR)/.github/demo-meetings" -shots "$(CURDIR)/.github/screens" \
+		-pages home,meetings,style,stats

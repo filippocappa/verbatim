@@ -99,6 +99,8 @@ enum DockPolicy {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pill: PillPanel?
     private var notch: NotchPanel?
+    private var answers: AnswerPanel?
+    private var livePanel: LivePanel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let controller = DictationController.shared
@@ -106,8 +108,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.pill = pill
         let notch = NotchPanel(controller: controller)
         self.notch = notch
-        controller.onPhaseChange = { [weak pill, weak notch] phase in pill?.update(for: phase); notch?.refresh() }
+        let livePanel = LivePanel(controller: controller)
+        self.livePanel = livePanel
+        controller.onPhaseChange = { [weak pill, weak notch, weak livePanel] phase in
+            pill?.update(for: phase)
+            notch?.refresh()
+            livePanel?.update(for: phase)
+        }
         controller.onMeetingChange = { [weak notch] _ in notch?.refresh() }
+        let answers = AnswerPanel()
+        self.answers = answers
+        controller.onAnswer = { [weak answers] question, answer in answers?.show(question: question, answer: answer) }
+        #if DEBUG
+        // A test run (-test…) does its job and quits: no shortcuts, no meeting watching, next to the real app.
+        if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-test") }) {
+            Demo.runIfRequested(controller)
+            return
+        }
+        #endif
         controller.start()
         MeetingController.shared.startWatching()
         DockPolicy.start()

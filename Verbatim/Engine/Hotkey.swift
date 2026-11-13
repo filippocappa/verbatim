@@ -1,18 +1,22 @@
 import AppKit
 
 /// Detects a "clean" tap of the right-hand copy of one modifier key (right ⌘ for dictation, right ⌥ for
-/// commands): pressed and released quickly with no other key, click or modifier in between.
+/// commands, right ⇧ for translating): pressed and released quickly with no other key, click or modifier in between.
 /// The left keys are left alone, so normal shortcuts like ⌘C never count.
 /// The controller decides what a tap means (double tap to start, single tap to stop).
 @MainActor
 final class ModifierTapMonitor {
     let modifier: NSEvent.ModifierFlags
-    /// The device bits macOS sets for each side (NX_DEVICER/LCMDKEYMASK, NX_DEVICER/LALTKEYMASK).
+    /// The device bits macOS sets for each side (NX_DEVICER/LCMDKEYMASK, NX_DEVICER/LALTKEYMASK, NX_DEVICER/LSHIFTKEYMASK).
     private let right: UInt
     private let left: UInt
     init(_ modifier: NSEvent.ModifierFlags) {
         self.modifier = modifier
-        (right, left) = modifier == .option ? (0x40, 0x20) : (0x10, 0x08)
+        switch modifier {
+        case .option: (right, left) = (0x40, 0x20)
+        case .shift: (right, left) = (0x04, 0x02)
+        default: (right, left) = (0x10, 0x08)
+        }
     }
 
     var onTap: ((TimeInterval) -> Void)?

@@ -112,7 +112,7 @@ enum Snippets {
 }
 
 enum Store {
-    static let container: ModelContainer = {
+    static let url: URL = {
         let dir = URL.applicationSupportDirectory.appending(path: AppInfo.bundleID, directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         #if DEBUG
@@ -121,7 +121,11 @@ enum Store {
         #else
         let file = "Library.store"
         #endif
-        let config = ModelConfiguration(url: dir.appending(path: file))
+        return dir.appending(path: file)
+    }()
+
+    static let container: ModelContainer = {
+        let config = ModelConfiguration(url: url)
         do {
             return try ModelContainer(for: Dictation.self, VocabEntry.self, Snippet.self, configurations: config)
         } catch {

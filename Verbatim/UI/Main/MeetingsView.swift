@@ -28,9 +28,9 @@ struct MeetingFile: Identifiable, Equatable {
         service = field("service").flatMap { $0.isEmpty ? nil : $0 }
         started = field("started").flatMap(Double.init).map(Date.init(timeIntervalSince1970:))
             ?? ((try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast)
-        // From start to the file's last write (the recap, just after the call ends).
+        // A recording says how long it is. A call: from start to the file's last write (the recap, just after it ends).
         let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? started
-        let minutes = Int(modified.timeIntervalSince(started) / 60)
+        let minutes = Int((field("length").flatMap(Double.init) ?? modified.timeIntervalSince(started)) / 60)
         length = started == .distantPast ? nil : minutes < 1 ? "under a minute" : minutes < 60 ? "\(minutes) min" : "\(minutes / 60) h \(minutes % 60) min"
     }
 
@@ -45,7 +45,9 @@ struct MeetingsView: View {
     @State private var selection: URL?
     @State private var search = ""
     @State private var confirmDelete: MeetingFile?
+    @State private var asking = false
     private var controller: MeetingController { .shared }
+    private var importer: MeetingImport { .shared }
 
     private var filtered: [MeetingFile] {
         search.isEmpty ? meetings : meetings.filter { $0.text.localizedCaseInsensitiveContains(search) }
@@ -68,9 +70,13 @@ struct MeetingsView: View {
                 ContentUnavailableView {
                     Label("No meetings yet", systemImage: "video")
                 } description: {
-                    Text("When a call starts in Zoom, Meet, Teams or another call app, \(AppInfo.name) offers to take notes. Each meeting gets a recap and a transcript here.")
+                    Text("When a call starts in Zoom, Meet, Teams or another call app, \(AppInfo.name) offers to take notes. Each meeting gets a recap and a transcript here. You can also drop a recording here.")
                 } actions: {
-                    Button("Take Notes Now") { controller.start() }.buttonStyle(.glass)
+                    HStack {
+                        Button("Take Notes Now") { controller.start() }
+                        Button("Transcribe a Recording…") { importer.pick() }
+                    }
+                    .buttonStyle(.glass)
                 }
             } else {
                 HStack(spacing: 0) {
@@ -78,7 +84,7 @@ struct MeetingsView: View {
                         ForEach(sections, id: \.day) { section in
                             Section(header(section.day)) {
                                 ForEach(section.items) { m in
-                                    MeetingRow(meeting: m, live: isLive(m)).tag(m.url)
+                                    MeetingRow(meeting: m, live: isLive(m), note: note(m)).tag(m.url)
                                         .contextMenu {
                                             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([m.url]) }
                                             Divider()
@@ -91,7 +97,7 @@ struct MeetingsView: View {
                     .frame(width: 280)
                     Divider()
                     if let m = selected {
-                        MeetingDetail(meeting: m, live: isLive(m)) { reload() }
+                        MeetingDetail(meeting: m, live: isLive(m), note: note(m)) { reload() }
                     } else {
                         ContentUnavailableView.search(text: search)
                     }
@@ -107,6 +113,15 @@ struct MeetingsView: View {
                 } else {
                     Button { controller.start() } label: { Label("Take Notes", systemImage: "record.circle") }
                 }
+            }
+            ToolbarItem {
+                Button { asking = true } label: { Label("Ask", systemImage: "text.magnifyingglass") }
+                    .help("Ask a question about all your meetings")
+                    .disabled(meetings.isEmpty)
+            }
+            ToolbarItem {
+                Button { importer.pick() } label: { Label("Transcribe a Recording", systemImage: "waveform.badge.plus") }
+                    .help("Transcribe a recording or a video into a meeting. You can also drop it here.")
             }
             ToolbarItem {
                 Button { NSWorkspace.shared.open(MeetingNotes.folder) } label: { Label("Show Folder", systemImage: "folder") }
@@ -128,9 +143,30 @@ struct MeetingsView: View {
             }
         }
         .onChange(of: controller.lastFile) { _, new in if let new { selection = new } }
+        .onChange(of: importer.file) { _, new in if let new { reload(); selection = new } }
+        .sheet(isPresented: $asking) {
+            MeetingAskView { m in
+                search = ""
+                selection = m.url
+                asking = false
+            }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            importer.add(urls)
+            return true
+        }
+        .alert(importer.lastError ?? "", isPresented: Binding(
+            get: { importer.lastError != nil }, set: { if !$0 { importer.lastError = nil } })) {
+            Button("OK") {}
+        }
     }
 
-    private func isLive(_ m: MeetingFile) -> Bool { controller.isRecording && controller.lastFile == m.url }
+    private func isLive(_ m: MeetingFile) -> Bool {
+        (controller.isRecording && controller.lastFile == m.url) || importer.file == m.url
+    }
+
+    /// What a recording being transcribed is up to.
+    private func note(_ m: MeetingFile) -> String? { importer.file == m.url ? importer.status : nil }
 
     private func reload() {
         let fresh = MeetingFile.all()
@@ -149,11 +185,17 @@ struct MeetingsView: View {
 private struct MeetingRow: View {
     let meeting: MeetingFile
     let live: Bool
+    var note: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Group {
-                if let service = meeting.service, let logo = ServiceLogos.shared.image(service) {
+                if meeting.service == MeetingNotes.recordingService {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 20, height: 20)
+                        .background(.quaternary, in: .rect(cornerRadius: 5))
+                } else if let service = meeting.service, let logo = ServiceLogos.shared.image(service) {
                     Image(nsImage: logo).resizable().frame(width: 20, height: 20).clipShape(.rect(cornerRadius: 5))
                 } else {
                     AppIconView(bundleID: meeting.bundleID, size: 20)
@@ -163,7 +205,10 @@ private struct MeetingRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(meeting.title).lineLimit(1)
                 HStack(spacing: 5) {
-                    if live {
+                    if let note {
+                        ProgressView().controlSize(.mini)
+                        Text(note)
+                    } else if live {
                         Circle().fill(.red).frame(width: 6, height: 6)
                         Text("Taking notes")
                     } else {
@@ -183,11 +228,12 @@ private struct MeetingRow: View {
 private struct MeetingDetail: View {
     let meeting: MeetingFile
     let live: Bool
+    var note: String?
     let changed: () -> Void
 
     private enum Block: Hashable {
         case section(String), heading(String), bullet(String), task(String, done: Bool, line: Int)
-        case line(time: String, them: Bool, text: String), note(String), text(String)
+        case line(time: String, speaker: String, text: String, line: Int), note(String), text(String)
     }
 
     private var blocks: [Block] {
@@ -203,14 +249,21 @@ private struct MeetingDetail: View {
             else if l.lowercased().hasPrefix("- [x] ") { out.append(.task(String(l.dropFirst(6)), done: true, line: i)) }
             else if l.hasPrefix("- ") || l.hasPrefix("* ") { out.append(.bullet(String(l.dropFirst(2)))) }
             else if l.hasPrefix("**"), let end = l.range(of: ":**") {
-                let head = l[l.index(l.startIndex, offsetBy: 2)..<end.lowerBound].split(separator: " ")
-                out.append(.line(time: head.first.map(String.init) ?? "", them: head.last == "Them",
-                                 text: String(l[end.upperBound...]).trimmingCharacters(in: .whitespaces)))
+                let head = l[l.index(l.startIndex, offsetBy: 2)..<end.lowerBound].split(separator: " ", maxSplits: 1)
+                out.append(.line(time: head.first.map(String.init) ?? "", speaker: head.count > 1 ? String(head[1]) : "Them",
+                                 text: String(l[end.upperBound...]).trimmingCharacters(in: .whitespaces), line: i))
             }
             else if l.hasPrefix("_") && l.hasSuffix("_") { out.append(.note(String(l.dropFirst().dropLast()))) }
             else if out.isEmpty { continue } // the date line, shown in the header
             else { out.append(.text(l)) }
         }
+        return out
+    }
+
+    /// Everyone in the transcript, in order of first line.
+    private var speakers: [String] {
+        var out: [String] = []
+        for case let .line(_, s, _, _) in blocks where !out.contains(s) { out.append(s) }
         return out
     }
 
@@ -220,7 +273,10 @@ private struct MeetingDetail: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(meeting.title).font(.pageTitle)
                     HStack(spacing: 6) {
-                        if live {
+                        if let note {
+                            ProgressView().controlSize(.small)
+                            Text("\(note). The transcript fills in as it goes.")
+                        } else if live {
                             Circle().fill(.red).frame(width: 7, height: 7)
                             Text("Taking notes now. The transcript fills in as you talk.")
                         } else {
@@ -233,7 +289,14 @@ private struct MeetingDetail: View {
                 .padding(.bottom, 14)
 
                 HStack(spacing: 8) {
-                    Button("Copy Notes") { Paster.copy(meeting.text.replacingOccurrences(of: #"<!--.*-->\n\n"#, with: "", options: .regularExpression)) }
+                    Button("Copy Notes") { Paster.copy(MeetingExport.markdown(meeting)) }
+                    Menu("Export") {
+                        ForEach(MeetingExport.Format.allCases, id: \.self) { f in
+                            Button("\(f.rawValue)…") { MeetingExport.save(meeting, as: f) }
+                        }
+                    }
+                    .fixedSize()
+                    .disabled(live)
                     Button("Open in Editor") { NSWorkspace.shared.open(meeting.url) }
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([meeting.url]) }
                 }
@@ -271,14 +334,12 @@ private struct MeetingDetail: View {
                 Text(inline(t)).strikethrough(done).foregroundStyle(done ? .secondary : .primary)
             }
             .padding(.vertical, 2)
-        case let .line(time, them, text):
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(time).font(.callout).monospacedDigit().foregroundStyle(.tertiary).frame(width: 44, alignment: .trailing)
-                Text(them ? "Them" : "You").font(.callout.weight(.semibold)).foregroundStyle(them ? .secondary : .primary)
-                    .frame(width: 40, alignment: .leading)
-                Text(text)
-            }
-            .padding(.vertical, 5)
+        case let .line(time, speaker, text, line):
+            TranscriptLine(time: time, speaker: speaker, text: text, speakers: speakers, editable: !live,
+                           rename: { rename(speaker, to: $0) },
+                           edit: { setLine(line, text: $0) },
+                           saidBy: { setSpeaker(line, time: time, to: $0) },
+                           delete: { removeLine(line) })
         case let .note(t):
             Text(t).foregroundStyle(.secondary).italic().padding(.vertical, 2)
         case let .text(t):
@@ -290,6 +351,58 @@ private struct MeetingDetail: View {
         (try? AttributedString(markdown: s)) ?? AttributedString(s)
     }
 
+    /// Puts a name on a voice everywhere in the file: transcript labels and the recap.
+    private func rename(_ old: String, to new: String) {
+        let new = new.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ":", with: "")
+        guard !new.isEmpty, new != old, new != "You" else { return }
+        let parts = meeting.text.components(separatedBy: "\n## Transcript")
+        guard parts.count == 2 else { return }
+        let escaped = NSRegularExpression.escapedPattern(for: old)
+        // In the recap: the label as a whole word ("Person 1", not "Person 10").
+        let recap = parts[0].replacingOccurrences(of: "(?<![\\w#])\(escaped)(?![\\w])", with: NSRegularExpression.escapedTemplate(for: new),
+                                                  options: .regularExpression)
+        // In the transcript: only the speaker labels, "**1:23 Person 1:**".
+        let transcript = parts[1].replacingOccurrences(of: "(\\*\\*[0-9:]+ )\(escaped)(:\\*\\*)", with: "$1\(NSRegularExpression.escapedTemplate(for: new))$2",
+                                                       options: .regularExpression)
+        try? (recap + "\n## Transcript" + transcript).write(to: meeting.url, atomically: true, encoding: .utf8)
+        VoiceBook.renamed(old, to: new, in: meeting.url)
+        changed()
+    }
+
+    // MARK: Editing one line
+
+    private func setLine(_ i: Int, text: String) {
+        var lines = meeting.text.components(separatedBy: "\n")
+        guard lines.indices.contains(i), let end = lines[i].range(of: ":**") else { return }
+        let t = text.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return removeLine(i) }
+        lines[i] = String(lines[i][..<end.upperBound]) + " " + t
+        save(lines)
+    }
+
+    /// One line was said by someone else. The voice book isn't taught from a single line.
+    private func setSpeaker(_ i: Int, time: String, to name: String) {
+        var lines = meeting.text.components(separatedBy: "\n")
+        guard lines.indices.contains(i), let end = lines[i].range(of: ":**") else { return }
+        lines[i] = "**\(time) \(name):**" + lines[i][end.upperBound...]
+        save(lines)
+    }
+
+    private func removeLine(_ i: Int) {
+        var lines = meeting.text.components(separatedBy: "\n")
+        guard lines.indices.contains(i) else { return }
+        lines.remove(at: i)
+        // And the blank line that separated it.
+        if lines.indices.contains(i), lines[i].trimmingCharacters(in: .whitespaces).isEmpty { lines.remove(at: i) }
+        else if i > 0, lines[i - 1].trimmingCharacters(in: .whitespaces).isEmpty { lines.remove(at: i - 1) }
+        save(lines)
+    }
+
+    private func save(_ lines: [String]) {
+        try? lines.joined(separator: "\n").write(to: meeting.url, atomically: true, encoding: .utf8)
+        changed()
+    }
+
     /// Ticks an action item in the file itself.
     private func toggle(_ line: Int) {
         var lines = meeting.text.components(separatedBy: "\n")
@@ -298,5 +411,134 @@ private struct MeetingDetail: View {
         else { lines[line] = lines[line].replacingOccurrences(of: "- [x] ", with: "- [ ] ").replacingOccurrences(of: "- [X] ", with: "- [ ] ") }
         try? lines.joined(separator: "\n").write(to: meeting.url, atomically: true, encoding: .utf8)
         changed()
+    }
+}
+
+/// One line of the transcript. Right-click (or the pencil) to fix what was heard, give it to another speaker,
+/// or delete it.
+private struct TranscriptLine: View {
+    let time: String
+    let speaker: String
+    let text: String
+    let speakers: [String]
+    let editable: Bool
+    let rename: (String) -> Void
+    let edit: (String) -> Void
+    let saidBy: (String) -> Void
+    let delete: () -> Void
+    @State private var editing = false
+    @State private var draft = ""
+    @State private var hover = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(time).font(.callout).monospacedDigit().foregroundStyle(.tertiary).frame(width: 44, alignment: .trailing)
+            SpeakerName(name: speaker, canRename: speaker != "You" && editable,
+                        others: speakers.filter { $0 != speaker && $0 != "You" }, rename: rename)
+                .frame(width: 76, alignment: .leading)
+            if editing {
+                TextField("What was said", text: $draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .focused($focused)
+                    .onSubmit(save)
+                    .onExitCommand { editing = false }
+                    .onChange(of: focused) { if !focused && editing { save() } }
+                    .onAppear { focused = true }
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(.quaternary, in: .rect(cornerRadius: 6))
+                    .padding(.horizontal, -6).padding(.vertical, -3)
+            } else {
+                Text(text).frame(maxWidth: .infinity, alignment: .leading)
+                if editable {
+                    Button { start() } label: { Image(systemName: "pencil").foregroundStyle(.secondary) }
+                        .buttonStyle(.plain)
+                        .help("Edit this line")
+                        .opacity(hover ? 1 : 0)
+                }
+            }
+        }
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+        .onHover { hover = $0 }
+        .contextMenu {
+            if editable {
+                Button("Edit Line") { start() }
+                Menu("Said By") {
+                    ForEach(speakers.filter { $0 != speaker }, id: \.self) { s in Button(s) { saidBy(s) } }
+                }
+                .disabled(speakers.count < 2)
+                Divider()
+                Button("Delete Line", role: .destructive, action: delete)
+            }
+        }
+    }
+
+    private func start() {
+        draft = text
+        editing = true
+    }
+
+    private func save() {
+        editing = false
+        if draft != text { edit(draft) }
+    }
+}
+
+/// A speaker's name in the transcript. Click a voice from the other side to put a real name on it, or to say
+/// it's the same person as another voice (the call split one person in two).
+private struct SpeakerName: View {
+    let name: String
+    let canRename: Bool
+    var others: [String] = []
+    let rename: (String) -> Void
+    @State private var editing = false
+    @State private var draft = ""
+    @State private var hover = false
+
+    var body: some View {
+        let text = Text(name).font(.callout.weight(.semibold)).foregroundStyle(name == "You" ? .primary : .secondary)
+            .lineLimit(1).truncationMode(.tail)
+        if canRename {
+            Button { draft = name.hasPrefix("Person ") || name == "Them" ? "" : name; editing = true } label: {
+                text.underline(hover, color: .secondary)
+            }
+            .buttonStyle(.plain)
+            .onHover { hover = $0 }
+            .help("Rename \(name)")
+            .popover(isPresented: $editing, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Who is \(name)?").font(.headline)
+                    TextField("Name", text: $draft, prompt: Text("Name"))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 200)
+                        .onSubmit(save)
+                    Text("Changes it everywhere in this meeting.").font(.caption).foregroundStyle(.secondary)
+                    if !others.isEmpty {
+                        Divider()
+                        Text("Or the same person as").font(.caption).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(others, id: \.self) { other in
+                                Button(other) { editing = false; rename(other) }.buttonStyle(.link)
+                            }
+                        }
+                    }
+                    HStack {
+                        Spacer()
+                        Button("Cancel") { editing = false }
+                        Button("Rename", action: save).keyboardShortcut(.defaultAction)
+                            .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+                .padding(14)
+            }
+        } else {
+            text
+        }
+    }
+
+    private func save() {
+        editing = false
+        rename(draft)
     }
 }

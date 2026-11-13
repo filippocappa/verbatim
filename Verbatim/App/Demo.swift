@@ -1,19 +1,343 @@
 #if DEBUG
 import AppKit
+import SwiftUI
 import AVFoundation
 import SwiftData
+import ScreenCaptureKit
 
 /// Debug-only helpers for screenshots: `-demoPhase listening` holds the pill in one state,
 /// `-demoData YES` fills the library with sample dictations, `-openMain YES` opens the main window.
 enum Demo {
+    @MainActor
+    static func testMeeting(_ folder: URL) async {
+        let files = ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
+            .filter { ["aiff", "wav", "m4a", "caf"].contains($0.pathExtension) }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        var all: [Float] = []
+        var spans: [(start: Double, end: Double)] = []
+        for f in files {
+            let start = Double(all.count) / AudioRecorder.sampleRate
+            all += load16k(f)
+            spans.append((start, Double(all.count) / AudioRecorder.sampleRate))
+            all += [Float](repeating: 0, count: 6_400)
+        }
+        print("audio: \(files.count) files, \(Int(Double(all.count) / AudioRecorder.sampleRate)) s")
+        // -meetingNames "Ann Lee|Acme": stands in for the people Calendar would give.
+        let people = (UserDefaults.standard.string(forKey: "meetingNames") ?? "").split(separator: "|").map(String.init)
+        let notes = MeetingNotes(title: UserDefaults.standard.string(forKey: "meetingTitle") ?? "Test meeting",
+                                 bundleID: "", service: nil, started: Date(), people: people)
+        // A real call has 25 s before the first piece for this to load; here it has none.
+        if LocalModels.shared.state(.parakeet) == .ready { await LocalSpeech.shared.listen(for: notes.knownNames) }
+        // -fakeCaptions "Ann|Bob|Ann…": who says each file, as Meet's captions would show it: their captions
+        // move every second while they talk, 1.5 s behind.
+        let captions = (UserDefaults.standard.string(forKey: "fakeCaptions") ?? "").split(separator: "|").map(String.init)
+        for (name, span) in zip(captions, spans) {
+            for t in stride(from: span.start + 1.5, through: span.end + 1.5, by: 1) { notes.heard(name, at: t) }
+        }
+        let audio = CallAudio()
+        let piece = 25 * Int(AudioRecorder.sampleRate)
+        let began = Date()
+        for start in stride(from: 0, to: all.count, by: piece) {
+            let p = Array(all[start..<min(start + piece, all.count)])
+            audio.append(p)
+            await notes.transcribe(p, at: Double(start) / AudioRecorder.sampleRate, them: true)
+            // -pieceDelay 3: a real call sends a piece every 25 s; this keeps tests under Groq's 20 a minute.
+            let delay = UserDefaults.standard.double(forKey: "pieceDelay")
+            if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+        }
+        var t = Date()
+        if let file = audio.close() { await notes.tellVoicesApart(file) }
+        audio.delete()
+        print("voices: \(String(format: "%.1f", Date().timeIntervalSince(t))) s")
+        notes.nameFromCaptions()
+        notes.nameThem()
+        // -speechOnly YES: print the transcript lines and stop, to compare speech engines.
+        if UserDefaults.standard.bool(forKey: "speechOnly") {
+            print("transcribed in \(String(format: "%.1f", Date().timeIntervalSince(began))) s")
+            // -fixNames YES: the Claude pass too (needs a Claude key).
+            if UserDefaults.standard.bool(forKey: "fixNames") {
+                t = Date()
+                let review = await notes.review()
+                print("claude: \(review?.fixes.count ?? 0) fixes in \(String(format: "%.1f", Date().timeIntervalSince(t))) s")
+                for f in review?.fixes ?? [] { print("  \(f.heard) → \(f.correct)") }
+                for s in review?.speakers ?? [] { print("  \(s.label) is \(s.name)") }
+            }
+            print("=== LINES")
+            for l in notes.lines { print("\(Int(l.at))\t\(l.label)\t\(l.text)") }
+            try? FileManager.default.removeItem(at: notes.file)
+            return
+        }
+        t = Date()
+        _ = await notes.finish()
+        print("recap: \(String(format: "%.1f", Date().timeIntervalSince(t))) s")
+        print((try? String(contentsOf: notes.file, encoding: .utf8)) ?? "")
+        try? FileManager.default.removeItem(at: notes.file)
+    }
+
+    private static func load16k(_ url: URL) -> [Float] {
+        guard let file = try? AVAudioFile(forReading: url),
+              let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: AudioRecorder.sampleRate, channels: 1, interleaved: false),
+              let converter = AVAudioConverter(from: file.processingFormat, to: target),
+              let input = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)),
+              (try? file.read(into: input)) != nil else { return [] }
+        let capacity = AVAudioFrameCount(Double(input.frameLength) * AudioRecorder.sampleRate / file.processingFormat.sampleRate) + 1024
+        guard let out = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return [] }
+        var done = false
+        converter.convert(to: out, error: nil) { _, status in
+            if done { status.pointee = .endOfStream; return nil }
+            done = true
+            status.pointee = .haveData
+            return input
+        }
+        return Array(UnsafeBufferPointer(start: out.floatChannelData![0], count: Int(out.frameLength)))
+    }
+
     static func runIfRequested(_ controller: DictationController) {
         let d = UserDefaults.standard
         if d.bool(forKey: "demoData") { seed() }
         if let look = d.string(forKey: "demoAppearance") {
             NSApp.appearance = NSAppearance(named: look == "light" ? .aqua : .darkAqua)
         }
+        // -shots <folder> [-pages home,stats]: renders main window pages offscreen into PNGs for the README,
+        // then quits. Nothing is put on screen. Use with -demoData YES and -meetingsFolder.
+        if let dir = d.string(forKey: "shots") {
+            let pages = (d.string(forKey: "pages") ?? "home,stats,meetings,style").split(separator: ",").compactMap { Page(rawValue: String($0)) }
+            Task { await shots(pages, to: URL(fileURLWithPath: dir), controller: controller); exit(0) }
+            return
+        }
         if let bundle = d.string(forKey: "testLearning") {
             Task { await testLearning(in: bundle, text: d.string(forKey: "learnText"), editByHand: !d.bool(forKey: "learnWait")); exit(0) }
+            return
+        }
+        // -testMeeting <folder>: plays the audio files in it, in name order, as the other side of a call,
+        // through the meeting pipeline (pieces, voices, recap), then prints the notes.
+        if let folder = d.string(forKey: "testMeeting") {
+            Task { await testMeeting(URL(fileURLWithPath: folder)); exit(0) }
+            return
+        }
+        // -testCallPeople YES: prints the names read from a Meet window that's open now.
+        if d.bool(forKey: "testCallPeople") {
+            let app = MeetingWatcher.apps.first { $0.name == (d.string(forKey: "callApp") ?? "Safari") }!
+            let call = MeetingWatcher.Call(app: app, title: "test", service: "meet.google.com")
+            let started = Date()
+            let names = CallPeople.names(in: call)
+            print("people:", names, String(format: "%.2f s", Date().timeIntervalSince(started)))
+            exit(0)
+        }
+        // -testPieces <file> -at 350,550: sends those 25 s pieces to Groq with and without the Dictionary prompt.
+        if let path = d.string(forKey: "testPieces") {
+            Task {
+                let all = load16k(URL(fileURLWithPath: path))
+                let rate = Int(AudioRecorder.sampleRate)
+                for at in (d.string(forKey: "at") ?? "0").split(separator: ",").compactMap({ Int($0) }) {
+                    let p = Array(all[(at * rate)..<min((at + 25) * rate, all.count)])
+                    let up = Groq.upload(AudioRecorder.boost(p))
+                    let words = Vocabulary.promptWords(Vocabulary.all()).joined(separator: ", ")
+                    for (name, prompt) in [("with prompt", words), ("no prompt", "")] {
+                        guard let key = Keychain.groqKey else { print("no key"); exit(1) }
+                        let t = try? await Groq.transcribe(wav: up.data, key: key, prompt: prompt, language: nil, filename: up.filename, timeout: 30)
+                        print("[\(at) s, \(name)] \(t?.text.split(separator: " ").count ?? -1) words: \(t?.text ?? "failed")")
+                        try? await Task.sleep(for: .seconds(3))
+                    }
+                }
+                exit(0)
+            }
+            return
+        }
+        // -testBackup <zip>: backs up, then restores the same zip (nothing should be added).
+        if let path = d.string(forKey: "testBackup") {
+            do {
+                let made = try Backup.make(to: URL(fileURLWithPath: path))
+                print("backed up:", made.text)
+                let added = try Backup.restore(from: URL(fileURLWithPath: path))
+                print("restore added:", added.text)
+            } catch { print("failed:", error.localizedDescription) }
+            exit(0)
+        }
+        // -testExport <folder>: the newest meeting, saved there in every format.
+        if let folder = d.string(forKey: "testExport") {
+            let from = d.string(forKey: "exportFrom").flatMap { MeetingFile(url: URL(fileURLWithPath: $0)) }
+            guard let m = from ?? MeetingFile.all().first else { print("no meetings"); exit(1) }
+            for f in MeetingExport.Format.allCases {
+                let url = URL(fileURLWithPath: folder).appending(path: "export." + (f == .pdf ? "pdf" : f == .text ? "txt" : "md"))
+                do { try MeetingExport.write(m, as: f, to: url); print("saved", url.lastPathComponent) } catch { print(f, error) }
+            }
+            exit(0)
+        }
+        // -testFormat "a|b": Groq's cleanup plus the spoken formatting, as a dictation would get it.
+        if let text = d.string(forKey: "testFormat") {
+            Task {
+                for t in text.components(separatedBy: "|") {
+                    let (said, send) = SpokenFormat.takeSend(t)
+                    let (lead, heard) = SpokenFormat.leadingBreak(said)
+                    var out = heard
+                    if let key = Keychain.groqKey,
+                       let c = try? await Groq.cleanup(heard, key: key, model: Prefs.cleanupModel, style: .clean,
+                                                       vocabulary: [], appName: "Slack"),
+                       let ok = Cleanup.accept(c, raw: heard) {
+                        out = SpokenFormat.safetyNet(ok)
+                    } else {
+                        out = SpokenFormat.apply(heard)
+                    }
+                    print("IN ", t)
+                    out = lead + out
+                    print("OUT", out.replacingOccurrences(of: "\n", with: "⏎"), send ? "[Return]" : "")
+                }
+                exit(0)
+            }
+            return
+        }
+        // -testImport <file>: transcribes a recording into a meeting, prints the notes, then deletes them.
+        if let path = d.string(forKey: "testImport") {
+            Task {
+                let started = Date()
+                MeetingImport.shared.add([URL(fileURLWithPath: path)])
+                var last = ""
+                while MeetingImport.shared.running {
+                    if MeetingImport.shared.status != last { last = MeetingImport.shared.status; print("·", last) }
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
+                print("took \(Int(Date().timeIntervalSince(started))) s", MeetingImport.shared.lastError ?? "")
+                if let f = MeetingImport.shared.lastFile {
+                    print((try? String(contentsOf: f, encoding: .utf8)) ?? "")
+                    try? FileManager.default.removeItem(at: f)
+                }
+                exit(0)
+            }
+            return
+        }
+        // -testAsk "question" [-askFrom <folder>]: asks across the meetings (or the .md files in the folder).
+        if let q = d.string(forKey: "testAsk") {
+            Task {
+                var meetings = MeetingFile.all()
+                if let dir = d.string(forKey: "askFrom") {
+                    let urls = (try? FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: dir), includingPropertiesForKeys: nil)) ?? []
+                    meetings = urls.filter { $0.pathExtension == "md" }.compactMap(MeetingFile.init).sorted { $0.started > $1.started }
+                }
+                let t = Date()
+                do {
+                    let a = try await MeetingAsk.answer(q, in: meetings)
+                    print("read:", a.read.map(\.title), "cited:", a.cited.map(\.title), String(format: "%.1f s", Date().timeIntervalSince(t)))
+                    print(a.text)
+                } catch { print("failed:", error.localizedDescription) }
+                exit(0)
+            }
+            return
+        }
+        // -testVoices "a.wav|b.wav": prints of each file's voices, how alike they are across files, and which
+        // of b's voices the voice book recognises after learning a's (named in order of first turn).
+        if let files = d.string(forKey: "testVoices") {
+            Task {
+                let urls = files.components(separatedBy: "|").map { URL(fileURLWithPath: $0) }
+                var all: [(file: Int, id: String, print: [Float], first: Double)] = []
+                for (n, u) in urls.enumerated() {
+                    guard let r = try? await Voices.shared.turns(in: u) else { print("failed on", u.lastPathComponent); exit(1) }
+                    for (id, p) in r.prints {
+                        all.append((n, id, p, r.turns.filter { $0.speaker == id }.map(\.start).min() ?? 0))
+                    }
+                }
+                all.sort { ($0.file, $0.first) < ($1.file, $1.first) }
+                for a in all where a.file == 0 {
+                    let row = all.filter { $0.file == 1 }.map { "\($0.id)@\(Int($0.first))s \(String(format: "%.2f", VoiceBook.similarity(a.print, $0.print)))" }
+                    print("a:\(a.id)@\(Int(a.first))s →", row.joined(separator: "  "))
+                }
+                VoiceBook.forgetAll()
+                let names = (d.string(forKey: "voiceNames") ?? "").components(separatedBy: ",")
+                for (a, name) in zip(all.filter { $0.file == 0 }, names) { VoiceBook.learn(name, a.print) }
+                let b = Dictionary(uniqueKeysWithValues: all.filter { $0.file == 1 }.map { ($0.id, $0.print) })
+                let got = VoiceBook.names(for: b)
+                for x in all where x.file == 1 { print("b:\(x.id)@\(Int(x.first))s is", got[x.id] ?? "(not recognised)") }
+                VoiceBook.forgetAll()
+                exit(0)
+            }
+            return
+        }
+        // -testAssist "what was said" -assistApp "TextEdit" [-assistWrite YES]: reads that app's front window, runs
+        // the assistant and prints the reply; an answer also shows in the panel for 8 s.
+        if let said = d.string(forKey: "testAssist") {
+            Task {
+                let name = d.string(forKey: "assistApp") ?? ""
+                let app = NSWorkspace.shared.runningApplications.first { $0.localizedName == name }
+                let started = Date()
+                let screen = await ScreenContext.capture(app: app, field: nil)
+                print("screen:", screen.app, "·", screen.window, "·", screen.text.count, "chars · picture:", screen.image != nil,
+                      String(format: "· %.1f s", Date().timeIntervalSince(started)))
+                print(screen.text.prefix(600))
+                do {
+                    let reply = try await Assistant.run(said, screen: screen, canWrite: d.bool(forKey: "assistWrite"))
+                    print("MODE", reply.mode, String(format: "(%.1f s)", Date().timeIntervalSince(started)))
+                    print(reply.text)
+                    if !reply.writes {
+                        controller.onAnswer?(said, reply.text)
+                        try? await Task.sleep(for: .seconds(8))
+                    }
+                } catch { print("failed:", error.localizedDescription) }
+                exit(0)
+            }
+            return
+        }
+        // -testLive file.wav [-liveOut card.png]: plays the file through the live-words loop, a pass every 0.4 s
+        // of audio, and prints what's white [settled] and grey {guess} each time. Draws the card at a third,
+        // two thirds and the end of the file.
+        if let path = d.string(forKey: "testLive") {
+            Task {
+                guard let all = try? await AudioFile.load16k(URL(fileURLWithPath: path)) else { print("can't read"); exit(1) }
+                var words = LiveTranscript()
+                var shots: [(Double, LiveText)] = []
+                let flat = { (s: String) in s.replacingOccurrences(of: "\n", with: "⏎") }
+                for now in stride(from: 8_000, through: all.count + 6_400, by: 6_400) {
+                    let upTo = min(now, all.count)
+                    let started = Date()
+                    guard await words.advance(open: Array(all[words.end..<upTo]), language: nil) else { continue }
+                    let t = words.text
+                    print(String(format: "%5.1f s  %.2f s  ", Double(upTo) / 16_000, Date().timeIntervalSince(started)),
+                          "[\(flat(String(t.settled.suffix(60))))]{\(flat(t.guess))}\(t.send ? " ↵" : "")")
+                    shots.append((Double(upTo) / 16_000, t))
+                }
+                if let out = d.string(forKey: "liveOut"), !shots.isEmpty {
+                    let picks = [shots.count / 3, shots.count * 2 / 3, shots.count - 1].map { shots[$0] }
+                    let view = VStack(alignment: .leading, spacing: 18) {
+                        ForEach(Array(picks.enumerated()), id: \.offset) { _, shot in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(String(format: "%.1f s", shot.0)).font(.caption).foregroundStyle(.gray)
+                                LiveCard(text: shot.1)
+                            }
+                        }
+                    }
+                    .padding(24).frame(width: 640, alignment: .leading).background(Color(white: 0.85))
+                    let r = ImageRenderer(content: view)
+                    r.scale = 2
+                    if let img = r.nsImage, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
+                        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out))
+                    }
+                }
+                exit(0)
+            }
+            return
+        }
+        // -testTranslate "a|b": translates each into the other language, as right ⇧⇧ does after cleanup.
+        if let text = d.string(forKey: "testTranslate") {
+            Task {
+                for t in text.components(separatedBy: "|") {
+                    let target = Groq.italianShare(t) >= 0.5 ? "English" : "Italian"
+                    let out = (try? await Commands.translate(t, to: target, key: Keychain.groqKey ?? "")) ?? "(failed)"
+                    print("IN ", t)
+                    print("OUT", target, "·", out.replacingOccurrences(of: "\n", with: "⏎"))
+                }
+                exit(0)
+            }
+            return
+        }
+        // -testMacCleanup "a|b": cleans it up with Apple Intelligence and prints the result.
+        if let text = d.string(forKey: "testMacCleanup") {
+            Task {
+                for t in text.components(separatedBy: "|") {
+                    let start = Date()
+                    let out = await MacModel.cleanup(t) ?? "(nil, pasted as heard)"
+                    print(String(format: "%.2fs", Date().timeIntervalSince(start)), "|", out)
+                }
+                exit(0)
+            }
             return
         }
         // -testTap com.apple.QuickTimePlayerX: listens to that app (and the mic) for -tapSeconds, printing levels,
@@ -487,12 +811,58 @@ enum Demo {
         }
     }
 
+    /// A window whose frame is left as given.
+    final class ShotWindow: NSWindow {
+        override func constrainFrameRect(_ r: NSRect, to screen: NSScreen?) -> NSRect { r }
+    }
+
+    @MainActor
+    static func shots(_ pages: [Page], to dir: URL, controller: DictationController) async {
+        let d = UserDefaults.standard
+        // Asking would put a permission dialog on screen; only go ahead if it's already granted.
+        guard CGPreflightScreenCaptureAccess() else { print("no Screen Recording permission"); return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let size = (d.string(forKey: "windowSize") ?? "1080x720").split(separator: "x").compactMap { Double($0) }
+        for page in pages {
+            let window = ShotWindow(contentRect: NSRect(x: 0, y: 0, width: size[0], height: size[1]),
+                                    styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                                    backing: .buffered, defer: false)
+            window.appearance = NSAppearance(named: .darkAqua)
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: MainView(shown: page).environment(controller).modelContainer(Store.container))
+            // Behind the desktop picture: drawn and capturable, but never seen and never clicked.
+            window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) - 1)
+            window.ignoresMouseEvents = true
+            if let screen = NSScreen.main?.visibleFrame { window.setFrameOrigin(NSPoint(x: screen.minX + 40, y: screen.minY + 40)) }
+            window.orderFront(nil)
+            try? await Task.sleep(for: .seconds(2.5))
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+                guard let w = content.windows.first(where: { $0.windowID == CGWindowID(window.windowNumber) }) else {
+                    print("\(page.rawValue): window not found"); continue
+                }
+                let filter = SCContentFilter(desktopIndependentWindow: w)
+                let config = SCStreamConfiguration()
+                config.width = Int(filter.contentRect.width * CGFloat(filter.pointPixelScale))
+                config.height = Int(filter.contentRect.height * CGFloat(filter.pointPixelScale))
+                config.showsCursor = false
+                let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                let rep = NSBitmapImageRep(cgImage: image)
+                try rep.representation(using: .png, properties: [:])?.write(to: dir.appending(path: "\(page.rawValue).png"))
+                print("\(page.rawValue): \(image.width)x\(image.height)")
+            } catch { print("\(page.rawValue): \(error.localizedDescription)") }
+            window.orderOut(nil)
+        }
+    }
+
     static func seed() {
         let ctx = Store.context
         guard (try? ctx.fetchCount(FetchDescriptor<Dictation>())) == 0 else { return }
         let apps: [(String, String)] = [
-            ("Cursor", "com.todesktop.230313mzl4w4u92"), ("Terminal", "com.apple.Terminal"),
-            ("Slack", "com.tinyspeck.slackmacgap"), ("Arc", "company.thebrowser.Browser"),
+            ("Linear", "com.linear"), ("Terminal", "com.apple.Terminal"),
+            ("WhatsApp", "net.whatsapp.WhatsApp"), ("Chrome", "com.google.Chrome"),
             ("Notes", "com.apple.Notes"), ("Messages", "com.apple.MobileSMS"),
         ]
         let lines = [

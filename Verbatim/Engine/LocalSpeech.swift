@@ -59,6 +59,14 @@ enum LocalModel: String, CaseIterable, Identifiable, Sendable {
             .appendingPathComponent("\(appName)/Models/whisper", isDirectory: true)
     }
 
+    /// The small CTC model that checks names from the Dictionary and the calendar against the audio
+    /// (about 100 MB, fetched the first time a meeting runs on Parakeet).
+    nonisolated static var ctcFolder: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("\(appName)/Models", isDirectory: true)
+            .appendingPathComponent(CtcModels.defaultCacheDirectory(for: .ctc110m).lastPathComponent, isDirectory: true)
+    }
+
     nonisolated static var whisperFolder: URL {
         whisperBase.appendingPathComponent("models/argmaxinc/whisperkit-coreml/openai_whisper-\(whisperVariant)",
                                            isDirectory: true)
@@ -147,6 +155,7 @@ final class LocalModels {
         await LocalSpeech.shared.unload(m)
         let folder = m == .parakeet ? LocalModel.parakeetFolder : LocalModel.whisperBase
         try? FileManager.default.removeItem(at: folder)
+        if m == .parakeet { try? FileManager.default.removeItem(at: LocalModel.ctcFolder) }
         states[m] = .none
         log.notice("deleted \(m.rawValue, privacy: .public)")
     }
@@ -158,6 +167,9 @@ actor LocalSpeech {
     static let shared = LocalSpeech()
 
     private var parakeet: AsrManager?
+    /// Names Parakeet should listen for in this meeting, checked against the audio after each piece.
+    private var boost: (words: [String], session: VocabularyBoostingSession)?
+    private var wantedNames: [String] = []
     private var whisper: WhisperKit?
     private var loading: Task<Void, Error>?
     private var loadingModel: LocalModel?
@@ -228,6 +240,7 @@ actor LocalSpeech {
     private func unloadAll() {
         parakeet = nil
         whisper = nil
+        boost = nil
     }
 
     /// Restarts the 10-minute countdown to unloading.
@@ -246,10 +259,70 @@ actor LocalSpeech {
         log.notice("unloaded the local model after 10 idle minutes")
     }
 
+    // MARK: Names
+
+    /// Makes Parakeet listen for these words (names, Dictionary) until it's called again. Empty turns it off.
+    /// Downloads the checking model the first time. On failure, transcription just goes on without it.
+    func listen(for words: [String]) async {
+        let words = Array(Set(words.map { $0.trimmingCharacters(in: .whitespaces) }.filter { $0.count >= 3 })).sorted()
+        wantedNames = words
+        guard !words.isEmpty else { boost = nil; return }
+        if boost?.words == words { return }
+        do {
+            let started = Date()
+            let ctc = try await CtcModels.load(from: LocalModel.ctcFolder, variant: .ctc110m)
+            let vocabulary = CustomVocabularyContext(terms: words.map { CustomVocabularyTerm(text: $0) })
+            // Tuned on a recorded call (Nov 2026). The defaults swapped "market" for "Parakeet" (similarity 0.62)
+            // and "Paolo mentioned" for "Paolo Enoizi" (0.60), and the acoustic rescue put names over unrelated
+            // words ("TFPEs. Whether we" → "Chris Wetherbee").
+            let d = UserDefaults.standard
+            let config = VocabularyRescorer.Config(shortTermCbwTaperPivot: d.object(forKey: "namesTaper") as? Int ?? 5,
+                                                   spotterRescueEnabled: d.bool(forKey: "namesRescue"))
+            let thresholds = VocabularyBoostingSession.Thresholds(minSimilarity: d.object(forKey: "namesMinSim") as? Float ?? 0.65)
+            boost = (words, try await VocabularyBoostingSession(vocabulary: vocabulary, ctcModels: ctc, config: config,
+                                                                 thresholds: thresholds))
+            log.notice("listening for \(words.count) names, ready in \(Date().timeIntervalSince(started), format: .fixed(precision: 1)) s")
+        } catch {
+            boost = nil
+            log.error("couldn't load the names model: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Puts each name where the names model found it ("Givens" → "Giveans"): the first match after the
+    /// previous one, so the same word elsewhere in the piece stays as it is. Keeps punctuation.
+    private static func applyNames(_ fixes: [VocabularyRescorer.RescoringResult], to segments: [Groq.Segment]) -> [Groq.Segment] {
+        func plain(_ w: String) -> String { w.lowercased().trimmingCharacters(in: .punctuationCharacters) }
+        var words: [(seg: Int, word: String)] = segments.enumerated().flatMap { i, s in
+            s.text.split(separator: " ").map { (i, String($0)) }
+        }
+        var cursor = 0
+        for r in fixes {
+            guard let new = r.replacementWord?.split(separator: " ").map(String.init), !new.isEmpty else { continue }
+            let old = r.originalWord.split(separator: " ").map { plain(String($0)) }.filter { !$0.isEmpty }
+            guard !old.isEmpty, words.count >= old.count else { continue }
+            func find(from: Int) -> Int? {
+                guard from <= words.count - old.count else { return nil }
+                return (from...(words.count - old.count)).first { i in old.indices.allSatisfy { plain(words[i + $0].word) == old[$0] } }
+            }
+            guard let at = find(from: cursor) ?? find(from: 0) else { continue }
+            let last = words[at + old.count - 1].word
+            let tail = String(last.reversed().prefix { $0.isPunctuation }.reversed())
+            var put = new.map { (seg: words[at].seg, word: $0) }
+            put[put.count - 1].word += tail
+            words.replaceSubrange(at..<(at + old.count), with: put)
+            cursor = at + put.count
+        }
+        return segments.enumerated().map { i, s in
+            Groq.Segment(start: s.start, end: s.end, text: words.filter { $0.seg == i }.map(\.word).joined(separator: " "))
+        }
+    }
+
     // MARK: Transcribing
 
     /// 16 kHz mono samples to text. `language` is "en", "it" or nil for auto. `prompt` only helps Whisper.
-    func transcribe(_ samples: [Float], model: LocalModel, language: String?, prompt: String?) async throws -> Groq.Transcript {
+    /// `timed` also returns sentences with their times, for meetings. `names` checks the words from `listen(for:)`.
+    func transcribe(_ samples: [Float], model: LocalModel, language: String?, prompt: String?,
+                    timed: Bool = false, names: Bool = false) async throws -> Groq.Transcript {
         try await warm(model)
         let started = Date()
         defer {
@@ -265,22 +338,59 @@ actor LocalSpeech {
             var state = TdtDecoderState.make()
             let hint = language.flatMap { Language(rawValue: $0) }
             let result = try await parakeet.transcribe(audio, decoderState: &state, language: hint)
-            let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            var text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            var segments = timed ? Self.sentences(buildWordTimings(from: result.tokenTimings ?? []).map { ($0.word, $0.startTime, $0.endTime) }) : []
+            // Unloaded since (idle, or dictation switched to Whisper): load the names again.
+            if names, boost == nil, !wantedNames.isEmpty { await listen(for: wantedNames) }
+            if names, let boost, let rescored = await boost.session.rescore(text: result.text, tokenTimings: result.tokenTimings ?? [],
+                                                                      audioSamples: audio), rescored.wasModified {
+                let fixes = rescored.replacements.filter(\.shouldReplace)
+                log.notice("names: \(fixes.map { "\($0.originalWord) → \($0.replacementWord ?? "")" }.joined(separator: ", "), privacy: .public)")
+                if segments.isEmpty {
+                    text = Self.applyNames(fixes, to: [Groq.Segment(start: 0, end: 0, text: text)])[0].text
+                } else {
+                    segments = Self.applyNames(fixes, to: segments)
+                    text = segments.map(\.text).joined(separator: " ")
+                }
+            }
             // Parakeet doesn't say which language it heard; the text does.
-            return Groq.Transcript(text: text, language: language ?? (Groq.italianShare(text) > 0.5 ? "it" : "en"))
+            return Groq.Transcript(text: text, language: language ?? (Groq.italianShare(text) > 0.5 ? "it" : "en"),
+                                   segments: segments)
         case .whisper:
             guard let whisper else { throw Self.error("Whisper isn't loaded") }
             var options = DecodingOptions(verbose: false, task: .transcribe, language: language,
                                           temperatureFallbackCount: 3, detectLanguage: language == nil,
-                                          skipSpecialTokens: true, withoutTimestamps: true)
+                                          skipSpecialTokens: true, withoutTimestamps: !timed)
             if let prompt, !prompt.isEmpty, let tokenizer = whisper.tokenizer {
                 options.promptTokens = tokenizer.encode(text: " " + prompt)
                     .filter { $0 < tokenizer.specialTokens.specialTokenBegin }
             }
             let results = try await whisper.transcribe(audioArray: samples, decodeOptions: options)
             let text = results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-            return Groq.Transcript(text: text, language: results.first?.language ?? language)
+            let segments = results.flatMap(\.segments).map {
+                Groq.Segment(start: Double($0.start), end: Double($0.end),
+                             text: $0.text.replacing(/<\|[^|]*\|>/, with: "").trimmingCharacters(in: .whitespaces))
+            }.filter { !$0.text.isEmpty }
+            return Groq.Transcript(text: text, language: results.first?.language ?? language, segments: timed ? segments : [])
         }
+    }
+
+    /// Words into sentences: a new one after . ? ! or a pause of more than 0.8 s.
+    private static func sentences(_ words: [(word: String, start: Double, end: Double)]) -> [Groq.Segment] {
+        var out: [Groq.Segment] = []
+        var current: [(word: String, start: Double, end: Double)] = []
+        func flush() {
+            guard let first = current.first, let last = current.last else { return }
+            out.append(Groq.Segment(start: first.start, end: last.end, text: current.map(\.word).joined(separator: " ")))
+            current = []
+        }
+        for w in words {
+            if let last = current.last, w.start - last.end > 0.8 { flush() }
+            current.append(w)
+            if let c = w.word.last, ".?!".contains(c) { flush() }
+        }
+        flush()
+        return out
     }
 
     private static func error(_ text: String) -> NSError {

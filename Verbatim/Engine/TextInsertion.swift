@@ -57,6 +57,15 @@ struct FocusedField {
 }
 
 enum Paster {
+    /// Presses Return, for "send" at the end of a dictation.
+    static func pressReturn() {
+        let src = CGEventSource(stateID: .combinedSessionState)
+        let down = CGEvent(keyboardEventSource: src, virtualKey: 36, keyDown: true)
+        let up = CGEvent(keyboardEventSource: src, virtualKey: 36, keyDown: false)
+        down?.post(tap: .cghidEventTap)
+        up?.post(tap: .cghidEventTap)
+    }
+
     /// Copies text to the clipboard the normal way (for Copy buttons in the app).
     static func copy(_ text: String) {
         NSPasteboard.general.clearContents()

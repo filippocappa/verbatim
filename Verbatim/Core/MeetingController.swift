@@ -3,7 +3,6 @@ import Observation
 import os
 
 /// Meeting notes: notices calls, offers to take notes, and records both sides while it does.
-/// Step 2 of the plan: listening and the start/stop flow. The transcript comes in step 3.
 @MainActor
 @Observable
 final class MeetingController {
@@ -27,7 +26,13 @@ final class MeetingController {
     @ObservationIgnored private var offered: MeetingWatcher.Call?
     @ObservationIgnored private var hearingCheck: Task<Void, Never>?
     @ObservationIgnored private var notes: MeetingNotes?
+    /// The other side, kept in a temp file until the voices are told apart.
+    @ObservationIgnored private var callAudio: CallAudio?
     @ObservationIgnored private var chunker: Task<Void, Never>?
+    /// Reads the names on the call's video tiles every 10 s.
+    @ObservationIgnored private var peopleReader: Task<Void, Never>?
+    /// Reads Meet's captions every second, when they're on, to know who's talking.
+    @ObservationIgnored private var captionReader: Task<Void, Never>?
     /// Pieces still being transcribed, so the recap waits for them.
     @ObservationIgnored private var pending: [Task<Void, Never>] = []
     /// Where each side has been cut up to.
@@ -40,20 +45,25 @@ final class MeetingController {
     func startWatching() {
         watcher.onChange = { [weak self] call in self?.callChanged(call) }
         watcher.start()
+        CallAudio.deleteLeftovers()
         for domain in MeetingWatcher.serviceDomains { ServiceLogos.shared.load(domain) }
     }
 
     private func callChanged(_ call: MeetingWatcher.Call?) {
         if let call {
             log.notice("call started: \(call.title, privacy: .public)")
-            guard !isRecording, Prefs.meetingOffer, offered != call else { return }
+            guard !isRecording, offered != call else { return }
+            if Prefs.meetingAutoStart {
+                offered = call
+                start(call)
+                if Prefs.sounds { NSSound(named: "Tink")?.play() }
+                return
+            }
+            guard Prefs.meetingOffer else { return }
             offered = call
             log.notice("offering notes, pill was: \(String(describing: DictationController.shared.phase), privacy: .public)")
             DictationController.shared.showMeeting(.offer(app: call.app.name, title: call.title, bundleID: call.app.bundleID, service: call.service))
             if Prefs.sounds { NSSound(named: "Tink")?.play() }
-            #if DEBUG
-            if UserDefaults.standard.bool(forKey: "autoTakeNotes") { start(call) }
-            #endif
         } else {
             log.notice("call ended")
             offered = nil
@@ -85,10 +95,12 @@ final class MeetingController {
         self.you = you
         let startDate = Date()
         state = .recording(call, started: startDate)
-        let notes = MeetingNotes(title: call.title, bundleID: call.app.bundleID, service: call.service, started: startDate)
+        let notes = MeetingNotes(title: call.title, bundleID: call.app.bundleID, service: call.service, started: startDate,
+                                 people: MeetingCalendar.attendees(at: startDate))
         self.notes = notes
         lastFile = notes.file
         cutThem = 0; cutYou = 0; pending = []
+        callAudio = CallAudio()
         chunker = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
@@ -96,6 +108,14 @@ final class MeetingController {
                 self.cut(final: false)
             }
         }
+        peopleReader = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.isRecording, let notes = self.notes else { return }
+                notes.met(CallPeople.names(in: call))
+                try? await Task.sleep(for: .seconds(10))
+            }
+        }
+        if call.service == "meet.google.com" { readCaptions(call, started: startDate) }
         log.notice("taking notes: \(them.tapped.joined(separator: ", "), privacy: .public)")
         DictationController.shared.showMeeting(.started(title: call.title))
         watchHearing(them)
@@ -114,6 +134,8 @@ final class MeetingController {
         hearingCheck?.cancel()
         ticker?.cancel()
         chunker?.cancel()
+        peopleReader?.cancel()
+        captionReader?.cancel()
         cut(final: true)
         them?.stop()
         _ = you?.stop()
@@ -125,12 +147,47 @@ final class MeetingController {
         self.notes = nil
         let waiting = pending
         pending = []
+        let audio = callAudio
+        callAudio = nil
         DictationController.shared.showMeeting(.writingNotes)
         Task {
             for t in waiting { await t.value }
+            if let file = audio?.close() { await notes.tellVoicesApart(file) }
+            notes.nameFromCaptions()
+            notes.nameThem()
+            audio?.delete()
             let ok = await notes.finish()
+            await LocalSpeech.shared.listen(for: [])
             self.log.notice("notes written: \(ok)")
             DictationController.shared.showMeeting(.saved(notes.file))
+        }
+    }
+
+    /// Only what changed is noted: a person's captions growing means they're talking now. The box is looked
+    /// for again every 10 s while it's missing or empty (captions turned on later, or the page redrawn).
+    private func readCaptions(_ call: MeetingWatcher.Call, started: Date) {
+        captionReader = Task { [weak self] in
+            var box: AXUIElement?
+            var lookedAt = Date.distantPast
+            var last: [String: String] = [:]
+            while !Task.isCancelled {
+                guard let self, self.isRecording, let notes = self.notes else { return }
+                if box == nil, Date().timeIntervalSince(lookedAt) > 10 {
+                    box = CallPeople.captionsBox(in: call)
+                    lookedAt = Date()
+                }
+                if let b = box {
+                    if let said = CallPeople.captions(b), !said.isEmpty {
+                        for (name, text) in said where last[name] != text && !text.isEmpty {
+                            last[name] = text
+                            notes.heard(name, at: Date().timeIntervalSince(started))
+                        }
+                    } else if Date().timeIntervalSince(lookedAt) > 10 {
+                        box = nil
+                    }
+                }
+                try? await Task.sleep(for: .seconds(1))
+            }
         }
     }
 
@@ -151,6 +208,7 @@ final class MeetingController {
             let at = Double(cutThem) / Double(rate)
             cutThem = p.end
             them.discard(upTo: p.end)
+            callAudio?.append(p.samples)
             pending.append(Task { await notes.transcribe(p.samples, at: at, them: true) })
         }
         if let you, let p = piece(you.sampleCount, cutYou, you.samples(from:to:)) {

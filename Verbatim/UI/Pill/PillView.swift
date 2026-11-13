@@ -10,7 +10,8 @@ struct PillView: View {
         GlassEffectContainer {
             if controller.phase != .idle && place != "notch" {
                 PillContent(phase: controller.phase, levels: controller.levels, startedAt: controller.startedAt,
-                            command: controller.command, note: controller.writingNote, onUndo: controller.undoLearned)
+                            command: controller.command, note: controller.writingNote, onUndo: controller.undoLearned,
+                            live: controller.liveCard ? LiveText() : controller.live)
                     .glassEffect(.regular, in: .capsule)
                     .glassEffectID("pill", in: glass)
                     .glassEffectTransition(.materialize)
@@ -30,18 +31,30 @@ struct PillContent: View {
     var command: DictationController.CommandKind?
     var note: String?
     var onUndo: () -> Void = {}
+    /// The words heard so far, with "Show words as you talk" on, when they can't be shown at the cursor.
+    var live = LiveText()
     /// Smaller, for the notch.
     var compact = false
 
     private var tag: String? {
         switch command {
         case .rewrite: "Edit selection"
-        case .action: "Command"
+        case .action, .assistant: "Command"
+        case .translate: Self.translateTarget(language)
         case nil: language == "auto" ? nil : language.uppercased()
         }
     }
 
     @AppStorage(Prefs.Key.language) private var language = "auto"
+
+    /// The tag while recording a translation: where it's going, when the language is set.
+    private static func translateTarget(_ language: String) -> String {
+        switch language {
+        case "it": "IT → EN"
+        case "en": "EN → IT"
+        default: "Translate"
+        }
+    }
 
     var body: some View {
         Group {
@@ -57,6 +70,16 @@ struct PillContent: View {
                         .shadow(color: .red.opacity(0.7), radius: 4)
                         .symbolEffect(.pulse, options: .repeating)
                     Waveform(levels: levels)
+                    if !live.isEmpty && !compact {
+                        (Text(live.flatSettled) + Text(live.flatGuess).foregroundStyle(.secondary)
+                            + Text(live.send ? "  ↵" : "").foregroundStyle(.secondary))
+                            .font(.system(size: 13))
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                            .frame(maxWidth: 300, alignment: .trailing)
+                            .contentTransition(.interpolate)
+                            .animation(.easeOut(duration: 0.2), value: live)
+                    }
                     Elapsed(since: startedAt ?? .now)
                     if let tag {
                         Text(tag)
@@ -72,7 +95,7 @@ struct PillContent: View {
             case .writing:
                 HStack(spacing: 9) {
                     ProgressView().controlSize(.small)
-                    Text(command == .rewrite ? "Rewriting" : command == .action ? "Working" : "Writing")
+                    Text(command == .rewrite ? "Rewriting" : command == .action ? "Working" : command == .assistant ? "Thinking" : command == .translate ? "Translating" : "Writing")
                     if let note {
                         Text(note).foregroundStyle(.secondary).transition(.opacity)
                     }

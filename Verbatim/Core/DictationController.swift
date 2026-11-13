@@ -51,8 +51,22 @@ final class DictationController {
     }
 
     private(set) var phase: Phase = .idle {
-        didSet { if phase != oldValue { onPhaseChange?(phase) } }
+        didSet {
+            if phase != oldValue { onPhaseChange?(phase) }
+            if phase != .listening, liveTask != nil { liveTask?.cancel(); liveTask = nil }
+            // The words stay up while the real text is written, and go when it's pasted.
+            if phase != .listening, phase != .writing, !live.isEmpty || liveCard {
+                live = LiveText()
+                liveCard = false
+            }
+        }
     }
+    /// What it's heard so far while you talk, when "Show words as you talk" is on. Only for showing: the text
+    /// that's pasted still comes from the usual engine.
+    private(set) var live = LiveText()
+    /// The live words go in their own card on the pill. False: in the pill itself, for commands and translations.
+    private(set) var liveCard = false
+    @ObservationIgnored private var liveTask: Task<Void, Never>?
     /// Recent loudness values, oldest first, for the live waveform.
     private(set) var levels: [Float] = Array(repeating: 0, count: DictationController.levelCount)
     private(set) var startedAt: Date?
@@ -64,6 +78,8 @@ final class DictationController {
     enum CommandKind: Equatable {
         case rewrite // text was selected
         case action  // open or search
+        case translate // dictation, pasted in the other language (Italian ↔ English)
+        case assistant // nothing selected and not open/search: writes at the cursor or answers, using the screen
     }
     private(set) var accessibilityTrusted = AXIsProcessTrusted()
     private(set) var keyRejected = false
@@ -73,6 +89,8 @@ final class DictationController {
     let connectivity = Connectivity()
 
     @ObservationIgnored var onPhaseChange: ((Phase) -> Void)?
+    /// The assistant answered a question: what was said, and the answer.
+    @ObservationIgnored var onAnswer: ((String, String) -> Void)?
 
     /// Meeting messages, shown from the notch, separate from the dictation pill so the two never collide.
     private(set) var meetingPill: MeetingPill? {
@@ -86,6 +104,8 @@ final class DictationController {
     @ObservationIgnored private let hotkey = ModifierTapMonitor(.command)
     @ObservationIgnored private let commandKey = ModifierTapMonitor(.option)
     @ObservationIgnored private var lastOptionTap: TimeInterval = 0
+    @ObservationIgnored private let translateKey = ModifierTapMonitor(.shift)
+    @ObservationIgnored private var lastShiftTap: TimeInterval = 0
     @ObservationIgnored private var selection: Task<String?, Never>?
     @ObservationIgnored private let recorder = AudioRecorder()
     @ObservationIgnored private let watcher = CorrectionWatcher()
@@ -115,6 +135,8 @@ final class DictationController {
         hotkey.start()
         commandKey.onTap = { [weak self] t in self?.handleOptionTap(t) }
         commandKey.start()
+        translateKey.onTap = { [weak self] t in self?.handleShiftTap(t) }
+        translateKey.start()
 
         recorder.onLevel = { [weak self] level in self?.push(level) }
 
@@ -143,6 +165,7 @@ final class DictationController {
                 self.accessibilityTrusted = true
                 self.hotkey.start()
                 self.commandKey.start()
+                self.translateKey.start()
             }
         }
     }
@@ -184,6 +207,21 @@ final class DictationController {
         }
     }
 
+    private func handleShiftTap(_ t: TimeInterval) {
+        guard t >= 0 else { lastShiftTap = 0; return }
+        if phase == .listening {
+            finish()
+            lastShiftTap = 0
+            return
+        }
+        if lastShiftTap > 0, t - lastShiftTap < 0.4 {
+            lastShiftTap = 0
+            begin(translate: true)
+        } else {
+            lastShiftTap = t
+        }
+    }
+
     /// Start/stop from a button in the app. Our own window is in front, so step aside first
     /// so the text lands where the user was typing.
     func toggleFromUI() {
@@ -198,10 +236,11 @@ final class DictationController {
 
     // MARK: Recording
 
-    func begin(command isCommand: Bool = false) {
+    func begin(command isCommand: Bool = false, translate: Bool = false) {
         guard !isPaused, !phase.isBusy else { return }
-        if isCommand, Keychain.groqKey == nil || !connectivity.isOnline {
-            show(.notice(.failed(Keychain.groqKey == nil ? "Commands need a Groq key" : "Commands need the internet")))
+        if isCommand || translate, Keychain.groqKey == nil || !connectivity.isOnline {
+            let what = isCommand ? "Commands" : "Translating"
+            show(.notice(.failed(Keychain.groqKey == nil ? "\(what) needs a Groq key" : "\(what) needs the internet")))
             return
         }
         guard AXIsProcessTrusted() else { show(.notice(.needsAccessibility)); return }
@@ -228,7 +267,7 @@ final class DictationController {
         targetApp = NSWorkspace.shared.frontmostApplication
         field = FocusedField.current()
         selection = nil
-        command = nil
+        command = translate ? .translate : nil
         if isCommand {
             // Read the selection now, before anything can move it. Accessibility answers instantly;
             // the ⌘C fallback takes a moment, so the pill says "Command" until we know.
@@ -248,11 +287,16 @@ final class DictationController {
 
         levels = Array(repeating: 0, count: Self.levelCount)
         startedAt = .now
+        live = LiveText()
+        // Plain dictation shows its words in a card on the pill; commands and translations keep them in the pill.
+        liveCard = liveWordsOn && !isCommand && !translate
         phase = .listening
         Sound.play(.start)
+        startLiveWords()
 
         dropParts()
         let local = LocalModels.shared.active
+        if !isCommand, Prefs.localOnly || Keychain.groqKey == nil || !connectivity.isOnline { MacModel.prewarm() }
         if let local, Prefs.localOnly || Keychain.groqKey == nil || !connectivity.isOnline {
             // Load the model while you talk, so it's ready when you stop.
             Task { try? await LocalSpeech.shared.warm(local) }
@@ -275,6 +319,35 @@ final class DictationController {
             try? await Task.sleep(for: .seconds(600))
             guard !Task.isCancelled else { return }
             self?.finish()
+        }
+    }
+
+    private var liveWordsOn: Bool { Prefs.liveWords && LocalModels.shared.state(.parakeet) == .ready }
+
+    /// A few times a second, Parakeet on this Mac reads what you've said since its last pause (a tenth of a
+    /// second or so each time), and LiveTranscript sorts out which words have settled. It never touches
+    /// what's pasted.
+    private func startLiveWords() {
+        liveTask?.cancel()
+        liveTask = nil
+        guard liveWordsOn else { return }
+        let language = Prefs.language == "auto" ? nil : Prefs.language
+        liveTask = Task { [weak self] in
+            var words = LiveTranscript()
+            // Parakeet may have been unloaded since the last dictation: load it now, while you start talking,
+            // not on the first read.
+            let started = ContinuousClock.now
+            try? await LocalSpeech.shared.warm(.parakeet)
+            let waited = started.duration(to: .now)
+            if waited < .milliseconds(300) { try? await Task.sleep(for: .milliseconds(300) - waited) }
+            while !Task.isCancelled {
+                guard let self, self.phase == .listening else { return }
+                let open = self.recorder.samples(from: words.end, to: self.recorder.sampleCount)
+                let changed = await words.advance(open: open, language: language)
+                guard !Task.isCancelled, self.phase == .listening else { return }
+                if changed { self.live = words.text }
+                try? await Task.sleep(for: .milliseconds(120))
+            }
         }
     }
 
@@ -350,7 +423,7 @@ final class DictationController {
         }
         writingNote = nil
         phase = .writing
-        if command == nil {
+        if command == nil || command == .translate {
             // You may have switched apps while talking. ⌘V lands wherever you are now,
             // so that's the app to save in History and to pick the tone for.
             targetApp = NSWorkspace.shared.frontmostApplication
@@ -359,9 +432,9 @@ final class DictationController {
         let field = self.field
         let app = targetApp
         let audio = AudioRecorder.boost(samples)
-        if command != nil, let selection {
+        if command == .rewrite || command == .action, let selection {
             job = Task { [weak self] in
-                await self?.runCommand(samples: audio, selection: await selection.value, field: field)
+                await self?.runCommand(samples: audio, selection: await selection.value, field: field, app: app)
             }
         } else {
             job = Task { [weak self] in
@@ -377,13 +450,26 @@ final class DictationController {
                          sent: [(end: Int, task: Task<Groq.Transcript?, Never>?)] = []) async {
         let entries = Vocabulary.all()
         let key = Keychain.groqKey
+        let translating = command == .translate
+        defer { if translating, !phase.isBusy { command = nil } }
         guard let (transcript, engine) = await transcribe(samples, entries, sent: sent) else { return }
         let sttMs = stoppedAt.duration(to: .now).ms
         guard !Task.isCancelled else { return }
 
         guard !Cleanup.isHallucination(transcript.text) else { show(.notice(.nothingHeard)); return }
-        let raw = Vocabulary.applyReplacements(transcript.text, entries)
+        // "…see you tomorrow, send": paste the rest, then press Return.
+        var heard = transcript.text
+        var send = false
+        if Prefs.spokenSend { (heard, send) = SpokenFormat.takeSend(heard) }
+        if send, heard.isEmpty {
+            if field != nil { Paster.pressReturn() }
+            show(.done(symbol: "return", title: "Sent", detail: nil))
+            return
+        }
+        let (lead, said) = SpokenFormat.leadingBreak(heard)
+        let raw = Vocabulary.applyReplacements(said, entries)
         var text = raw
+        var translatedTo: String?
         let snippets = Snippets.all()
         let tone = Styles.tone(for: app?.bundleIdentifier)
 
@@ -391,31 +477,52 @@ final class DictationController {
         let style: CleanupStyle = tone == .formal ? .polished : .clean
         if let whole = Snippets.whole(raw, snippets) {
             // Just the trigger on its own: paste the snippet exactly as saved.
-            text = whole.text
+            text = lead + whole.text
             whole.uses += 1
         } else {
-            if engine == "groq", tone != .exact, let key, raw.split(whereSeparator: \.isWhitespace).count > 3 {
+            var formatted = false
+            if tone != .exact, raw.split(whereSeparator: \.isWhitespace).count > 3 {
                 let cl = signposter.beginInterval("cleanup")
-                if let cleaned = try? await Groq.cleanup(raw, key: key, model: Prefs.cleanupModel, style: style, tone: tone,
-                                                         vocabulary: entries.map(\.hint), appName: app?.localizedName),
-                   let ok = Cleanup.accept(cleaned, raw: raw) {
-                    text = ok
+                if let cleaned = await clean(raw, speech: engine, key: key, style: style, tone: tone, entries: entries, app: app) {
+                    text = cleaned.text
+                    formatted = cleaned.formatted
                 }
                 signposter.endInterval("cleanup", cl)
             }
+            // "new line", "bullet", "comma"…: Groq already did them, so only a safety net after it.
+            text = formatted ? SpokenFormat.safetyNet(text) : SpokenFormat.apply(text)
+            if translating, let key {
+                let target = Groq.italianShare(text) >= 0.5 ? "English" : "Italian"
+                do {
+                    let translated = try await Commands.translate(text, to: target, key: key)
+                    guard !translated.isEmpty else { show(.notice(.failed("Got nothing back, try again"))); return }
+                    text = translated
+                    translatedTo = target
+                } catch {
+                    if !Task.isCancelled { show(.notice(.failed("Couldn't translate: \(error.localizedDescription)"))) }
+                    return
+                }
+            }
             text = tone.finish(text)
             let expanded = Snippets.expand(text, snippets)
-            text = expanded.text
+            text = lead + expanded.text
             for s in expanded.used { s.uses += 1 }
         }
         guard !Task.isCancelled else { return }
 
-        if let c = field?.characterBeforeCursor, !c.isWhitespace, !"([{\"'“‘/`".contains(c) {
+        if let c = field?.characterBeforeCursor, !c.isWhitespace, !"([{\"'“‘/`".contains(c),
+           let first = text.first, !",.;:!?\n".contains(first) {
             text = " " + text
         }
         // With no text box in focus, ⌘V would go nowhere (or paste into the wrong thing), so just copy.
         if field == nil { Paster.copy(text.trimmingCharacters(in: .whitespaces)) }
-        else { Paster.paste(text, keep: Prefs.keepOnClipboard) }
+        else {
+            Paster.paste(text, keep: Prefs.keepOnClipboard)
+            if send {
+                // After the paste has landed, or some apps send the message before the text is in.
+                Task { try? await Task.sleep(for: .milliseconds(150)); Paster.pressReturn() }
+            }
+        }
         let latency = stoppedAt.duration(to: .now).ms
         log.info("pasted \(text.count) chars: speech \(sttMs) ms, total \(latency) ms, engine \(engine, privacy: .public)")
 
@@ -426,11 +533,35 @@ final class DictationController {
         Store.context.insert(d)
         try? Store.context.save()
 
-        show(field == nil ? .copied(words: d.words) : .pasted(words: d.words, latencyMs: latency, offline: engine == "apple"))
+        if let translatedTo {
+            show(.done(symbol: "globe", title: field == nil ? "Copied" : "Translated", detail: "in \(translatedTo)"))
+        } else {
+            show(field == nil ? .copied(words: d.words) : .pasted(words: d.words, latencyMs: latency, offline: engine == "apple"))
+        }
 
         if Prefs.learnFromCorrections, let field, !field.isSecure {
             watcher.watch(pasted: pasted, in: field)
         }
+    }
+
+    /// Groq when the speech came from Groq. Apple Intelligence on this Mac when the speech stayed on the Mac
+    /// (Only this Mac, offline, or Groq was slow) or when Groq's cleanup fails, e.g. out of free requests.
+    /// nil pastes the text as heard. `formatted` is true when Groq did it, which also handles "new line" and
+    /// the like; Apple's model only punctuates.
+    private func clean(_ raw: String, speech engine: String, key: String?, style: CleanupStyle, tone: Tone,
+                       entries: [VocabEntry], app: NSRunningApplication?) async -> (text: String, formatted: Bool)? {
+        if engine == "groq", let key {
+            do {
+                let cleaned = try await Groq.cleanup(raw, key: key, model: Prefs.cleanupModel, style: style, tone: tone,
+                                                     vocabulary: entries.map(\.hint), appName: app?.localizedName)
+                if let ok = Cleanup.accept(cleaned, raw: raw) { return (ok, true) }
+                return nil
+            } catch {
+                if Task.isCancelled { return nil }
+                log.error("Groq cleanup failed, using this Mac: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        return await MacModel.cleanup(raw).map { ($0, false) }
     }
 
     /// Speech to text: Groq when there's a key and a connection, Apple's on-device engine otherwise
@@ -448,6 +579,10 @@ final class DictationController {
         #endif
 
         let stt = signposter.beginInterval("transcribe")
+        // If Groq is late it may not come at all: get the Mac's cleanup model ready meanwhile, so falling
+        // back doesn't add a cold start on top of the wait.
+        let warm = useCloud ? Task { try? await Task.sleep(for: .seconds(1.5)); if !Task.isCancelled { MacModel.prewarm() } } : nil
+        defer { warm?.cancel() }
         do {
             if useCloud, let key {
                 do {
@@ -486,7 +621,10 @@ final class DictationController {
         let audio = await Task.detached { Groq.upload(samples) }.value
         // Groq usually answers in under a second, even for a minute of audio. If nothing comes back
         // for a few seconds it's having trouble, and the Mac's own engine will be quicker.
-        let timeout = min(12, 5 + Double(samples.count) / AudioRecorder.sampleRate * 0.1)
+        // With Parakeet ready the Mac is as quick and nearly as good, so give up on Groq sooner.
+        let seconds = Double(samples.count) / AudioRecorder.sampleRate
+        let timeout = LocalModels.shared.state(.parakeet) == .ready ? min(6, 2.5 + seconds * 0.05)
+                                                                    : min(12, 5 + seconds * 0.1)
         if language == "auto" {
             return try await Groq.transcribeAuto(wav: audio.data, key: key, words: words, filename: audio.filename,
                                                  timeout: timeout).pick
@@ -523,9 +661,11 @@ final class DictationController {
 
     // MARK: Commands
 
-    private func runCommand(samples: [Float], selection: String?, field: FocusedField?) async {
+    private func runCommand(samples: [Float], selection: String?, field: FocusedField?, app: NSRunningApplication?) async {
         defer { if !phase.isBusy { command = nil } }
         guard let key = Keychain.groqKey else { return }
+        // With nothing selected it may be for the assistant, so read the screen while the speech is transcribed.
+        let screen = selection == nil ? Task { await ScreenContext.capture(app: app, field: field) } : nil
         let entries = Vocabulary.all()
         guard let (transcript, _) = await transcribe(samples, entries), !Task.isCancelled else { return }
         guard !Cleanup.isHallucination(transcript.text) else { show(.notice(.nothingHeard)); return }
@@ -556,11 +696,34 @@ final class DictationController {
                     await write(cmd, extra: extra, key: key, field: field)
                 } else if let done = Commands.perform(action) {
                     show(.done(symbol: "arrow.up.right", title: done.title, detail: done.detail), for: 2.4)
+                } else if case .none = action, let screen {
+                    await assist(said, screen: await screen.value, field: field)
                 } else if case let .open(target, _, _) = action {
                     show(.notice(.failed("Couldn't find \(target) on this Mac")))
                 } else {
                     show(.notice(.failed("Not sure what to do with “\(said)”")))
                 }
+            }
+        } catch {
+            if !Task.isCancelled { show(.notice(.failed(error.localizedDescription))) }
+        }
+    }
+
+    /// Writes at the cursor ("reply that I'll be there at 5") or answers in a panel ("what does this error mean").
+    private func assist(_ said: String, screen: ScreenContext.Snapshot, field: FocusedField?) async {
+        command = .assistant
+        let canWrite = field.map { !$0.isSecure && Commands.isEditable($0) } ?? false
+        do {
+            let reply = try await Assistant.run(said, screen: screen, canWrite: canWrite)
+            guard !Task.isCancelled else { return }
+            guard !reply.text.isEmpty else { show(.notice(.failed("Got nothing back, try again"))); return }
+            if reply.writes {
+                Paster.paste(reply.text, keep: Prefs.keepOnClipboard)
+                show(.done(symbol: "checkmark", title: "Wrote", detail: said), for: 2.4)
+            } else {
+                dismissTask?.cancel()
+                phase = .idle
+                onAnswer?(said, reply.text)
             }
         } catch {
             if !Task.isCancelled { show(.notice(.failed(error.localizedDescription))) }
@@ -660,7 +823,8 @@ final class DictationController {
         case .started: 4
         case .stopped: 2.5
         case .cantHear: 10
-        case .writingNotes: 120
+        // Telling voices apart and a recap on this Mac can take a few minutes on a long call.
+        case .writingNotes: 900
         case .saved: 10
         case .failed: 5
         }

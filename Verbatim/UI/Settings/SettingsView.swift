@@ -4,13 +4,14 @@ import SwiftUI
 /// The ⌘, window: a sidebar like the main window's, with the pages on the right.
 struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
-        case general, speech, permissions
+        case general, speech, meetings, permissions
         var id: String { rawValue }
         var title: String { rawValue.capitalized }
         var symbol: String {
             switch self {
             case .general: "gearshape"
             case .speech: "waveform"
+            case .meetings: "person.2.wave.2"
             case .permissions: "lock.shield"
             }
         }
@@ -33,6 +34,7 @@ struct SettingsView: View {
                 switch section {
                 case .general: GeneralSettings()
                 case .speech: SpeechSettings()
+                case .meetings: MeetingSettings()
                 case .permissions: PermissionSettings()
                 }
             }
@@ -129,8 +131,10 @@ private struct GeneralSettings: View {
     @AppStorage(Prefs.Key.pillPlace) private var place = "pill"
     @AppStorage(Prefs.Key.keepOnClipboard) private var keepOnClipboard = true
     @AppStorage(Prefs.Key.learnFromCorrections) private var learn = true
+    @AppStorage(Prefs.Key.spokenSend) private var spokenSend = true
     @AppStorage(Prefs.Key.typingWPM) private var typingWPM = 40
     @State private var openAtLogin = SMAppService.mainApp.status == .enabled
+    @State private var backupStatus: String?
 
     var body: some View {
         SettingsPage {
@@ -152,8 +156,11 @@ private struct GeneralSettings: View {
                 SettingsRow(symbol: "mic", title: "Dictate", detail: "Double-tap the right ⌘ to start, tap it once to stop and paste.") {
                     KeyCaps(keys: ["⌘", "⌘"])
                 }
-                SettingsRow(symbol: "command", title: "Command", detail: "Double-tap the right ⌥. Rewrite the selection, or open and search.") {
+                SettingsRow(symbol: "command", title: "Command", detail: "Double-tap the right ⌥. Rewrite the selection, open and search, or ask about what's on screen.") {
                     KeyCaps(keys: ["⌥", "⌥"])
+                }
+                SettingsRow(symbol: "globe", title: "Translate", detail: "Double-tap the right ⇧. Say it in Italian, it's pasted in English, and the other way round.") {
+                    KeyCaps(keys: ["⇧", "⇧"])
                 }
                 SettingsRow(symbol: "xmark", title: "Throw it away", detail: "While recording or writing.") {
                     KeyCaps(keys: ["esc"])
@@ -165,7 +172,8 @@ private struct GeneralSettings: View {
                 PlacePicker(place: $place)
             }
 
-            SettingsGroup(title: "While you dictate") {
+            SettingsGroup(title: "While you dictate",
+                          footer: "Say “new line”, “new paragraph”, “bullet”, “comma” or “question mark” to format as you talk. In Italian too: “a capo”, “punto elenco”, “virgola”.") {
                 SettingsRow(symbol: "speaker.wave.2", title: "Sounds", detail: "A short sound when it starts and stops.") {
                     Switch(isOn: $sounds)
                 }
@@ -176,6 +184,10 @@ private struct GeneralSettings: View {
                 SettingsRow(symbol: "character.book.closed", title: "Learn from my fixes",
                             detail: "Correct a name right after pasting and it goes in your Dictionary.") {
                     Switch(isOn: $learn)
+                }
+                SettingsRow(symbol: "return", title: "Say “send” to send",
+                            detail: "End with “send” or “invia” and it presses Return after pasting.") {
+                    Switch(isOn: $spokenSend)
                 }
             }
 
@@ -197,6 +209,50 @@ private struct GeneralSettings: View {
                     }
                 }
             }
+
+            SettingsGroup(title: "Backup",
+                          footer: backupStatus ?? "Meetings, history, Dictionary, snippets, styles and commands in one zip file. Your API keys aren't in it. Restoring adds what's missing and deletes nothing.") {
+                SettingsRow(symbol: "archivebox", title: "Back up everything") {
+                    Button("Back Up…", action: backUp)
+                }
+                SettingsRow(symbol: "arrow.counterclockwise", title: "Restore from a backup") {
+                    Button("Restore…", action: restore)
+                }
+            }
+        }
+    }
+}
+
+extension GeneralSettings {
+    fileprivate func backUp() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.zip]
+        panel.nameFieldStringValue = Backup.suggestedName
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let c = try Backup.make(to: url)
+            backupStatus = "Saved \(c.text) to \(url.lastPathComponent)."
+        } catch {
+            backupStatus = "The backup failed: \(error.localizedDescription)"
+        }
+    }
+
+    fileprivate func restore() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.zip]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let alert = NSAlert()
+        alert.messageText = "Restore from \(url.lastPathComponent)?"
+        alert.informativeText = "Meetings, dictations, Dictionary words and snippets that aren't here yet are added. Nothing is deleted. Your settings, styles and commands go back to how they were in the backup."
+        alert.addButton(withTitle: "Restore")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            let c = try Backup.restore(from: url)
+            backupStatus = "Restored. Added \(c.text)."
+        } catch {
+            backupStatus = "The restore failed: \(error.localizedDescription)"
         }
     }
 }
@@ -209,6 +265,7 @@ private struct SpeechSettings: View {
     @AppStorage(Prefs.Key.microphone) private var microphone = Microphone.automatic
     @AppStorage(Prefs.Key.cleanupModel) private var model = Prefs.defaultCleanupModel
     @AppStorage(Prefs.Key.speechEngine) private var engine = "groq"
+    @AppStorage(Prefs.Key.liveWords) private var liveWords = false
     @State private var models = LocalModels.shared
     @State private var inputs = Microphone.inputs()
     @State private var advanced = false
@@ -258,9 +315,21 @@ private struct SpeechSettings: View {
                 }
             }
 
+            SettingsGroup(title: "While you talk") {
+                SettingsRow(symbol: "text.word.spacing", title: "Show words as you talk",
+                            detail: models.state(.parakeet) == .ready
+                                ? "Your words appear in a card on the pill as you speak, grey until they settle. Parakeet does it on this Mac; when you stop, the cleaned-up text is pasted as usual."
+                                : "Needs Parakeet. Download it below.") {
+                    Toggle("", isOn: $liveWords)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .disabled(models.state(.parakeet) != .ready)
+                }
+            }
+
             SettingsGroup(title: "Engines", footer: enginesFooter) {
                 SettingsRow(symbol: "arrow.triangle.branch", title: "Speech goes to",
-                            detail: engine == "local" ? "A model on this Mac. Your voice never leaves it." : "Groq when you're online, a model on this Mac otherwise.") {
+                            detail: engine == "local" ? "Speech, cleanup and meeting recaps stay on this Mac." : "Groq when you're online, this Mac when you're not or Groq is slow.") {
                     Picker("", selection: $engine) {
                         Text("Groq first").tag("groq")
                         Text("Only this Mac").tag("local")
@@ -273,7 +342,12 @@ private struct SpeechSettings: View {
                     Text(Keychain.groqKey == nil ? "No key" : engine == "local" ? "Off" : "In use").foregroundStyle(.secondary)
                 }
                 ForEach(LocalModel.allCases) { LocalModelRow(model: $0) }
-                SettingsRow(symbol: "apple.logo", title: "Apple", detail: "Built into macOS, nothing to download. One language at a time.") {
+                SettingsRow(symbol: "apple.intelligence", title: "Apple Intelligence",
+                            detail: MacModel.unavailableReason ?? "Cleans up text and writes meeting recaps on this Mac. Lighter than Groq: punctuation and filler words, your words stay as they are.") {
+                    Text(!MacModel.isAvailable ? "Off" : engine == "local" || Keychain.groqKey == nil ? "In use" : "Backup")
+                        .foregroundStyle(.secondary)
+                }
+                SettingsRow(symbol: "apple.logo", title: "Apple speech", detail: "Built into macOS, nothing to download. One language at a time.") {
                     Text(models.active == nil ? (Keychain.groqKey == nil || engine == "local" ? "In use" : "Backup") : "Last resort")
                         .foregroundStyle(.secondary)
                 }
@@ -306,7 +380,8 @@ private struct SpeechSettings: View {
 extension SpeechSettings {
     fileprivate var enginesFooter: String {
         if engine == "local", models.active == nil { return "Download a model above to keep everything on this Mac. Until then, Groq is used." }
-        return "Models on this Mac work offline and cost nothing. Cleanup still uses Groq when it's there; it only gets text, never audio."
+        if engine == "local" { return "Nothing leaves this Mac. Commands (right ⌥) still use Groq." }
+        return "Models on this Mac work offline and cost nothing. When Groq is down or out of free requests, Apple Intelligence cleans up the text instead."
     }
 }
 
@@ -402,7 +477,7 @@ private struct GroqUsageGroup: View {
     }
 
     private var footer: String {
-        "It isn't a reset at midnight: each one you use comes back on its own, spread over 24 hours. There's also a limit per minute (about 8 dictations in the same minute) and on audio per hour, which Groq doesn't report. When a limit is hit, speech falls back to Apple's engine on this Mac and text pastes without cleanup."
+        "It isn't a reset at midnight: each one you use comes back on its own, spread over 24 hours. There's also a limit per minute (about 8 dictations in the same minute) and on audio per hour, which Groq doesn't report. When a limit is hit, speech and cleanup move to this Mac."
     }
 
     private func check() async {
@@ -511,15 +586,47 @@ struct PermissionRow: View {
 }
 
 struct GroqKeyField: View {
-    @State private var key = Keychain.groqKey ?? ""
+    var body: some View {
+        KeyField(prompt: "Paste your key, starts with gsk_", saved: Keychain.groqKey,
+                 link: URL(string: "https://console.groq.com/keys")!, linkText: "Get a free key at console.groq.com",
+                 validate: Groq.validate(key:)) { Keychain.groqKey = $0 }
+    }
+}
+
+struct ClaudeKeyField: View {
+    var body: some View {
+        KeyField(prompt: "Paste your key, starts with sk-ant-", saved: Keychain.claudeKey,
+                 link: URL(string: "https://console.anthropic.com/settings/keys")!, linkText: "Get a key at console.anthropic.com",
+                 validate: Claude.validate(key:)) { Keychain.claudeKey = $0 }
+    }
+}
+
+/// A secret key: paste, test, save in the keychain.
+private struct KeyField: View {
+    let prompt: String
+    let link: URL
+    let linkText: String
+    let validate: (String) async -> Result<Void, Error>
+    let save: (String) -> Void
+    @State private var key: String
     @State private var status: Status = .idle
 
     enum Status: Equatable { case idle, testing, ok, failed(String) }
 
+    init(prompt: String, saved: String?, link: URL, linkText: String,
+         validate: @escaping (String) async -> Result<Void, Error>, save: @escaping (String) -> Void) {
+        self.prompt = prompt
+        self.link = link
+        self.linkText = linkText
+        self.validate = validate
+        self.save = save
+        _key = State(initialValue: saved ?? "")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                SecureField("API key", text: $key, prompt: Text("Paste your key, starts with gsk_"))
+                SecureField("API key", text: $key, prompt: Text(prompt))
                     .labelsHidden()
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: .infinity)
@@ -530,11 +637,9 @@ struct GroqKeyField: View {
             HStack(spacing: 6) {
                 switch status {
                 case .idle:
-                    Link(destination: URL(string: "https://console.groq.com/keys")!) {
-                        Text("Get a free key at console.groq.com").underline()
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    Link(destination: link) { Text(linkText).underline() }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 case .testing:
                     ProgressView().controlSize(.mini)
                 case .ok:
@@ -553,9 +658,9 @@ struct GroqKeyField: View {
         guard !k.isEmpty else { return }
         status = .testing
         Task {
-            switch await Groq.validate(key: k) {
+            switch await validate(k) {
             case .success:
-                Keychain.groqKey = k
+                save(k)
                 status = .ok
             case let .failure(error):
                 status = .failed(error.localizedDescription)
@@ -564,6 +669,94 @@ struct GroqKeyField: View {
     }
 }
 
+// MARK: - Meetings
+
+private struct MeetingSettings: View {
+    @AppStorage(Prefs.Key.meetingCalendar) private var calendar = false
+    @AppStorage(Prefs.Key.meetingOffer) private var offer = true
+    @AppStorage(Prefs.Key.meetingAutoStart) private var autoStart = false
+    @AppStorage(Prefs.Key.rememberVoices) private var rememberVoices = true
+    @State private var models = LocalModels.shared
+    @State private var calendarDenied = false
+    @State private var voices = VoiceBook.all()
+
+    var body: some View {
+        SettingsPage {
+            SettingsGroup(title: "When a call starts") {
+                SettingsRow(symbol: "play.circle", title: "Take notes by itself",
+                            detail: "Starts as soon as \(AppInfo.name) notices a call. Stop it from the pill or the menu bar.") {
+                    Switch(isOn: $autoStart)
+                }
+                if !autoStart {
+                    SettingsRow(symbol: "bell", title: "Offer to take notes",
+                                detail: "Shows Take Notes on the pill when a call starts.") {
+                        Switch(isOn: $offer)
+                    }
+                }
+            }
+
+            SettingsGroup(title: "Speech", footer: speechFooter) {
+                SettingsRow(symbol: "waveform", title: "Transcribed with",
+                            detail: "Parakeet on this Mac is more accurate on calls than Groq, and the audio never leaves the Mac.") {
+                    Text(models.state(.parakeet) == .ready ? "Parakeet" : Keychain.groqKey != nil ? "Groq" : "Apple speech")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            SettingsGroup(title: "Names",
+                          footer: "Names from your Dictionary are always used too, and in Google Meet the names on the video tiles. Turn on captions in Meet and each sentence gets the name of who said it. The names go to Claude when it's set up below.") {
+                SettingsRow(symbol: "calendar", title: "Names from Calendar",
+                            detail: calendarDenied ? "Calendar access is off. Turn it on in System Settings → Privacy & Security → Calendars."
+                                : "Reads who's invited to the call, so their names are spelled right.") {
+                    Switch(isOn: $calendar)
+                        .onChange(of: calendar) { _, on in
+                            guard on else { return }
+                            Task {
+                                let ok = await MeetingCalendar.requestAccess()
+                                calendarDenied = !ok
+                                if !ok { calendar = false }
+                            }
+                        }
+                }
+            }
+
+            SettingsGroup(title: "Voices",
+                          footer: "When you click a speaker in a transcript and name them, or Meet's captions do, the voice is remembered and named in the next meetings. A voice print is a few numbers, not a recording, and stays on this Mac.") {
+                SettingsRow(symbol: "person.wave.2", title: "Remember voices",
+                            detail: voices.isEmpty ? "No voices yet." : "Knows " + ListFormatter.localizedString(byJoining: voices.map(\.name)) + ".") {
+                    Switch(isOn: $rememberVoices)
+                }
+                if !voices.isEmpty {
+                    SettingsRow(symbol: "trash", title: "Forget voices") {
+                        Menu("Forget") {
+                            ForEach(voices) { v in Button(v.name) { VoiceBook.forget(v.name) } }
+                            Divider()
+                            Button("All Voices") { VoiceBook.forgetAll() }
+                        }
+                        .fixedSize()
+                    }
+                }
+            }
+
+            SettingsGroup(title: "Claude",
+                          footer: "After the call, Claude reads the transcript, fixes misheard names (people, companies, products) and works out who Person 1, Person 2… are. It sends the transcript to Anthropic, so it's off with “Only this Mac”. About $0.10 for an hour of call, paid from your Anthropic credit.") {
+                VStack(alignment: .leading, spacing: 0) {
+                    SettingsRow(symbol: "key", title: "API key") { EmptyView() }
+                    ClaudeKeyField()
+                        .padding(.leading, 52)
+                        .padding(.trailing, 12)
+                        .padding(.bottom, 12)
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: VoiceBook.changed)) { _ in voices = VoiceBook.all() }
+    }
+
+    private var speechFooter: String {
+        if models.state(.parakeet) == .ready { return "If Parakeet fails on a piece, Groq does it." }
+        return "Download Parakeet in Speech for better meeting notes. Until then, Groq does it."
+    }
+}
 
 // MARK: - Pill or Notch
 

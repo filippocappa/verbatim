@@ -64,6 +64,19 @@ enum Commands {
     - If the instruction is a question about the text, reply with the answer only.
     """
 
+    /// Dictation said in one language, pasted in the other (right ⇧⇧).
+    static func translate(_ text: String, to language: String, key: String) async throws -> String {
+        let system = """
+        Translate the user's text into \(language). Reply with the translation only: no quotes, no notes.
+        - Keep the meaning, the tone and how formal it is. Write it the way a native speaker would, not word for word.
+        - Keep line breaks, lists, names, links, numbers and code as they are.
+        - Words already in \(language) stay as they are.
+        """
+        let messages = [["role": "system", "content": system], ["role": "user", "content": text]]
+        let out = try await Groq.chat(messages, key: key, model: Prefs.cleanupModel, maxTokens: text.count * 2 + 800, timeout: 15)
+        return out.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     static func rewrite(_ text: String, instruction: String, key: String) async throws -> String {
         let saved = UserCommands.promptLines()
         let system = saved.isEmpty ? rewritePrompt : rewritePrompt + """
@@ -99,8 +112,8 @@ enum Commands {
 
     - "open X", "go to X", "apri X", "vai su X": open. Use kind "site" for websites and web services (YouTube, Gmail, Google Docs, Reddit) and kind "app" for Mac apps (Slack, Notes, Xcode, Spotify, Finder).
     - "search X on Y", "look up X on Y", "play X on YouTube", "cerca X su Y": search on Y. "google X", or "search X" with no site: search on google.
-    - A question with no other command ("what's the weather in Milan"): search on google with the question as the query.
-    - Anything else (write, delete, send, change settings): {"action": "none"}.
+    - A question that needs the web right now (weather, news, scores, prices, opening hours, "what's the weather in Milan"): search on google with the question as the query.
+    - Anything else: {"action": "none"}. That's writing something ("reply saying I'll be there", "write an email to Marco"), any other question ("what does this error mean", "summarise this"), and everything about what's on screen. An assistant that sees the screen handles those.
     """
 
     static func parse(_ command: String, key: String) async throws -> Action {
